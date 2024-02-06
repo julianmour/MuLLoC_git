@@ -1,0 +1,25 @@
+cd C:\Users\julianmour\OneDrive - Technion\Documents\Research\TKML-AP-master
+
+python -u plot_main_attack.py --k_value 2 --eps 3 --app target_attack --gpu 9 --label_difficult customized --data double_mnist_samples --dataset DMNIST --results dmnist --num_classes 10 --arch cnn --defense noDef --image_size 64 --remove_tier_para 0 --norm l2
+python -u plot_main_attack.py --k_value 2 --eps 3 --app target_attack --gpu 9 --label_difficult customized --data double_mnist_samples --dataset DMNIST --results dmnist --num_classes 10 --arch cnn --defense L0Def --image_size 64 --remove_tier_para 0 --norm l2
+python -u plot_main_attack.py --k_value 2 --eps 3 --app target_attack --gpu 9 --label_difficult customized --data double_mnist_samples --dataset DMNIST --results dmnist --num_classes 10 --arch cnn --defense LInfDef --image_size 64 --remove_tier_para 0 --norm l2
+
+python -u plot_main_attack.py --k_value 2 --eps 3 --app target_attack --gpu 9 --label_difficult customized --data double_mnist_samples --dataset DMNIST --results dmnist --num_classes 10 --arch cnn --defense noDef --image_size 64 --remove_tier_para 0 --norm lInf
+python -u plot_main_attack.py --k_value 2 --eps 3 --app target_attack --gpu 9 --label_difficult customized --data double_mnist_samples --dataset DMNIST --results dmnist --num_classes 10 --arch cnn --defense L0Def --image_size 64 --remove_tier_para 0 --norm lInf
+python -u plot_main_attack.py --k_value 2 --eps 3 --app target_attack --gpu 9 --label_difficult customized --data double_mnist_samples --dataset DMNIST --results dmnist --num_classes 10 --arch cnn --defense LInfDef --image_size 64 --remove_tier_para 0 --norm lInf
+
+
+python npy_to_img.py
+
+python generate_differences_heatmaps.py
+
+
+
+python -u plot_main_attack.py --k_value 2 --eps 3 --app target_attack --gpu 9 --label_difficult customized --data double_mnist_samples --dataset DMNIST --results dmnist --num_classes 10 --arch cnn --defense noDef --image_size 64 --remove_tier_para 0 --norm lInf
+
+
+
+python -u plot_main_attack.py --k_value 2 --eps 0.5 --app target_attack --attacked_label [2] --gpu 9 --label_difficult customized --data double_mnist_samples --dataset DMNIST --results dmnist --num_classes 10 --arch cnn --defense LInfDef --image_size 64 --remove_tier_para 0 --norm lInf --sample_name 0_25.png
+
+
+python -u plot_main_attack.py --k_value 2 --eps 0.01 --app target_attack --target_labels [6,3] --gpu 9 --label_difficult customized --data double_mnist_samples --dataset DMNIST --results dmnist --num_classes 10 --arch cnn --defense LInfDef --image_size 64 --remove_tier_para 0 --norm lInf --sample_name 18_67.png
