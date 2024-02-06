@@ -1,4 +1,4 @@
-# TopKClassify
+# MuLLoC
 
 **Instructions:**
 1) Download MuLLoC_git.zip and extract its content to MuLLoC directory.
