@@ -23,15 +23,14 @@ torch = pyimport("torch")
 pickle = pyimport("pickle")
 np = pyimport("numpy")
 
-dataset = "pascal-voc"
+dataset = "tmnist"
 # model_names = ["dmnist_noDef", "dmnist_L0Def", "dmnist_LInfDef"]
-model_names = ["pascal-voc_noDef_x3"]
+model_names = ["tmnist_noDef_x2"]
 # ks = [2, 3]
-# ks = [3, 4]
-ks = ["gt"]
+ks = [2]
 
 # epsilons = [0.003]
-epsilons = [0.0001]
+epsilons = [0.01]
 
 
 skip_sampling = false
@@ -243,7 +242,7 @@ for model_name in model_names
             till_img_idx = 30
             
             # skip = [1,3,5,7,9,11,13,15,17,19]
-            skip =[2,4,6,8,10,12,14,16,18,20]
+            skip = []
 
             mini_milp_time_limit = DEFAULT_MINI_MILP_TIME_LIMIT
 
@@ -335,7 +334,8 @@ for model_name in model_names
 
                 print("**************** PRUNING RELATIONS USING SAMPLED IMAGES ****************\n\n")
                 
-                sampling_classified = 0
+                random_sampling_classified = 0
+                corner_sampling_classified = 0
                 average_ranking = ranking
 
                 if skip_sampling == false
@@ -402,8 +402,8 @@ for model_name in model_names
                                     end
                                     time = now() - start_time
                                     classes_classification_time[top_class] = Float64(time.value)
-                                    classes_classification_part[top_class] = "sampling"
-                                    sampling_classified += 1
+                                    classes_classification_part[top_class] = "random sampling"
+                                    random_sampling_classified += 1
                                     stop_sampling_timer = now()
                                 end
                             end
@@ -423,8 +423,8 @@ for model_name in model_names
                                     end
                                     time = now() - start_time
                                     classes_classification_time[not_top_class] = Float64(time.value)
-                                    classes_classification_part[not_top_class] = "sampling"
-                                    sampling_classified += 1
+                                    classes_classification_part[not_top_class] = "random sampling"
+                                    random_sampling_classified += 1
                                     stop_sampling_timer = now()
                                 end
                             end
@@ -445,8 +445,11 @@ for model_name in model_names
                     average_ranking = sortperm(labels_rankings_avg)
                     print("labels average ranking: ", average_ranking, "\n\n")
 
+                    random_sampling_time = now() -start_time
+
                     print("**************** PRUNING RELATIONS USING EXTREME SAMPLED IMAGES ****************\n\n")
 
+                    corner_sampling_start_time = now()
                     si_idx = 1
                     stop_sampling_timer = now()
                     while true
@@ -494,8 +497,8 @@ for model_name in model_names
                                     end
                                     time = now() - start_time
                                     classes_classification_time[top_class] = Float64(time.value)
-                                    classes_classification_part[top_class] = "sampling"
-                                    sampling_classified += 1
+                                    classes_classification_part[top_class] = "corner sampling"
+                                    corner_sampling_classified += 1
                                 end
                             end
                         end
@@ -514,8 +517,8 @@ for model_name in model_names
                                     end
                                     time = now() - start_time
                                     classes_classification_time[not_top_class] = Float64(time.value)
-                                    classes_classification_part[not_top_class] = "sampling"
-                                    sampling_classified += 1
+                                    classes_classification_part[not_top_class] = "corner sampling"
+                                    corner_sampling_classified += 1
                                 end
                             end
                         end
@@ -533,13 +536,15 @@ for model_name in model_names
                     print("skipping sampling...\n\n")
                 end
 
-                sampling_time = now() -start_time
+                corner_sampling_time = now() - corner_sampling_start_time
 
 
                 print("**************** PRUNING RELATIONS USING ATTACKS ****************\n\n")
 
-                attack_start_time = now()
+                attacks_time = (now() - now())
+                swap_milps_time = (now() - now())
                 attacks_classified = 0
+                swap_milps_classified = 0
                 constraints_buffer = []
 
                 always_better_count = zeros(m)
@@ -555,6 +560,7 @@ for model_name in model_names
                         if classes_classification[top_class] == -1
                             print("Attacking the TOPK label ", string(top_class), ":\n\n")
                             for bottom_class in bottom_average_ranking
+                                attack_start_time = now()
                                 print("Attempting a SWAP ATTACK between labels ", string(top_class), " and ", string(bottom_class), ".\n")
                                 target_labels = filter!(x -> x!=top_class, push!(copy(topk), bottom_class))   #remove the top class from the topk and add the bottom class instaed 
                                 target_labels = target_labels .- 1      # the -1 is due the difference in indexing in python and julia
@@ -586,9 +592,10 @@ for model_name in model_names
                                         print("attack FAILED.\n\n")
                                         rm(attack_failed_path)
                                         successful_swaps[top_class, bottom_class] = -1
+                                        attacks_time += (now() - attack_start_time)
 
                                         if !skip_mini_milps
-
+                                            swap_milp_start_time = now()
                                             d = MIPVerifyMulti.relation_feasibility(
                                                 model, 
                                                 img_, 
@@ -617,6 +624,8 @@ for model_name in model_names
                                                 constraint["l2"] = bottom_class
                                                 push!(constraints_buffer, constraint)
                                             end
+
+                                            swap_milps_time += (now() - swap_milp_start_time)
 
                                         end
 
@@ -682,6 +691,8 @@ for model_name in model_names
 
                                         successful_swaps[top_class, bottom_class] = 1
 
+                                        attacks_time += (now() - attack_start_time)
+
                                         break
                                     end
 
@@ -700,8 +711,8 @@ for model_name in model_names
                                 print("new TOP class classified: ", top_class,"\n\n")
                                 time = now() - start_time
                                 classes_classification_time[top_class] = Float64(time.value)
-                                classes_classification_part[top_class] = "mini-milps"
-                                attacks_classified += 1
+                                classes_classification_part[top_class] = "swap-milps"
+                                swap_milps_classified += 1
                             end
                         end
                     end
@@ -711,6 +722,7 @@ for model_name in model_names
                         if classes_classification[bottom_class] == -1
                             print("Attacking the BOTTOM label ", string(bottom_class), ":\n\n")
                             for top_class in reverse(top_average_ranking)
+                                attack_start_time = now()
                                 print("Attempting a SWAP ATTACK between labels ", string(top_class), " and ", string(bottom_class), ".\n")
                                 if successful_swaps[top_class, bottom_class] == -1   # already tried this swap in topk attacks
                                     print("attack FAILED (from previous attempt).\n\n")
@@ -746,9 +758,10 @@ for model_name in model_names
                                         print("attack FAILED.\n\n")
                                         rm(attack_failed_path)
                                         successful_swaps[top_class, bottom_class] = -1
+                                        attacks_time += (now() - attack_start_time)
 
                                         if !skip_mini_milps
-
+                                            swap_milp_start_time = now()
                                             d = MIPVerifyMulti.relation_feasibility(
                                                 model, 
                                                 img_, 
@@ -777,6 +790,8 @@ for model_name in model_names
                                                 constraint["l2"] = bottom_class
                                                 push!(constraints_buffer, constraint)
                                             end
+
+                                            swap_milps_time += (now() - swap_milp_start_time)
 
                                         end
 
@@ -841,6 +856,8 @@ for model_name in model_names
 
                                         successful_swaps[top_class, bottom_class] = 1
 
+                                        attacks_time += (now() - attack_start_time)
+
                                         break
                                     end
 
@@ -859,8 +876,8 @@ for model_name in model_names
                                 print("new BOTTOM class classified: ", bottom_class,"\n\n")
                                 time = now() - start_time
                                 classes_classification_time[bottom_class] = Float64(time.value)
-                                classes_classification_part[bottom_class] = "mini-milps"
-                                attacks_classified += 1
+                                classes_classification_part[bottom_class] = "swap-milps"
+                                swap_milps_classified += 1
                             end
 
                         end
@@ -870,8 +887,6 @@ for model_name in model_names
                 else
                     print("skipping attacks...\n\n")
                 end
-
-                attacks_time = now() - attack_start_time
 
 
                 print("**************** CLASSIFYING LABELS USING A MILP VERIFIER ****************\n\n")
@@ -1240,12 +1255,12 @@ for model_name in model_names
                 Part_of_classification = classes_classification_part[ranking])
                 CSV.write(joinpath("$output_path", "classification_summary.csv"), df1, writeheader=true)
 
-                df2 = DataFrame(Part = ["Sampling", "Attacks + MINI-MILPS", "MILP Verifier: REGULAR + SUPER MILPS", "Total"], 
-                Execution_time_minutes = [Float64(sampling_time.value), Float64(attacks_time.value), Float64(verifier_time.value), Float64(sampling_time.value)+Float64(attacks_time.value)+Float64(verifier_time.value)]./60000,
-                Num_of_labels_classified = [sampling_classified, attacks_classified, verifier_classified, sampling_classified + attacks_classified + verifier_classified])
+                df2 = DataFrame(Part = ["Random Sampling", "Corner Sampling", "Attacks", "Swap-Milps", "MILP Verifier", "Total"],
+                Execution_time_minutes = [Float64(random_sampling_time.value), Float64(corner_sampling_time.value), Float64(attacks_time.value), Float64(swap_milps_time.value),Float64(verifier_time.value), Float64(random_sampling_time.value)+Float64(corner_sampling_time.value)+Float64(attacks_time.value)+Float64(swap_milps_time.value)+Float64(verifier_time.value)]./60000,
+                Num_of_labels_classified = [random_sampling_classified, corner_sampling_classified, attacks_classified, swap_milps_classified, verifier_classified, random_sampling_classified + corner_sampling_classified + attacks_classified + swap_milps_classified + verifier_classified])
                 CSV.write(joinpath("$output_path", "exec_summary.csv"), df2, writeheader=true)
 
-                df3 = DataFrame(MILP_TYPE = ["MINI-MILP", "REGULAR-MILP", "SUPER-MILP"], 
+                df3 = DataFrame(MILP_TYPE = ["SWAP-MILP", "REGULAR-MILP", "SUPER-MILP"],
                 TIMES = [mini_milps_num, regular_milps_num, super_milps_num])
                 CSV.write(joinpath("$output_path", "milp_summary.csv"), df3, writeheader=true)
 
