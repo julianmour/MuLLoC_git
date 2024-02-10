@@ -358,7 +358,7 @@ def get_dmnist_samples(data_dir, device, sample_name='all'):
             files = os.listdir(data_dir)
             for f in files:
                 target = f[-6:-4]
-                img_tensor = get_image_as_tensor(data_dir + '\\' + f).to(device)
+                img_tensor = get_image_as_tensor(os.path.join(data_dir, f)).to(device)
                 data.append((img_tensor, str_to_vector(target).to(device)))
 
             dump_file = open("all_dmnist_samples", 'wb')
@@ -370,7 +370,7 @@ def get_dmnist_samples(data_dir, device, sample_name='all'):
         if not os.path.exists(file_name + "_dmnist_sample"):
             f = sample_name
             target = f[-6:-4]
-            img_tensor = get_image_as_tensor(data_dir + '\\' + f).to(device)
+            img_tensor = get_image_as_tensor(os.path.join(data_dir, f)).to(device)
             data.append((img_tensor, str_to_vector(target).to(device)))
 
             dump_file = open(file_name + "_dmnist_sample", 'wb')
@@ -388,7 +388,7 @@ def get_tmnist_samples(data_dir, device, sample_name='all'):
             files = os.listdir(data_dir)
             for f in files:
                 target = f[-7:-4]
-                img_tensor = get_image_as_tensor(data_dir + '\\' + f).to(device)
+                img_tensor = get_image_as_tensor(os.path.join(data_dir, f)).to(device)
                 data.append((img_tensor, str_to_vector(target).to(device)))
 
             dump_file = open("all_tmnist_samples", 'wb')
@@ -400,7 +400,7 @@ def get_tmnist_samples(data_dir, device, sample_name='all'):
         if not os.path.exists(file_name + "_tmnist_sample"):
             f = sample_name
             target = f[-7:-4]
-            img_tensor = get_image_as_tensor(data_dir + '\\' + f).to(device)
+            img_tensor = get_image_as_tensor(os.path.join(data_dir, f)).to(device)
             data.append((img_tensor, str_to_vector(target).to(device)))
 
             dump_file = open(file_name + "_tmnist_sample", 'wb')
@@ -418,7 +418,7 @@ def get_pascalvoc_samples(data_dir, device, sample_name='all'):
             files = os.listdir(data_dir)
             for f in files:
                 target = f[0:-5].split("_")[1]
-                img_tensor = get_image_as_tensor(data_dir + '\\' + f, pascal=True).to(device)
+                img_tensor = get_image_as_tensor(os.path.join(data_dir, f), pascal=True).to(device)
                 data.append((img_tensor, str_to_vector_pascal(target).to(device)))
 
             dump_file = open("all_pascalvoc_samples", 'wb')
@@ -430,7 +430,7 @@ def get_pascalvoc_samples(data_dir, device, sample_name='all'):
         if not os.path.exists(file_name + "_pascalvoc_sample"):
             f = sample_name
             target = f[0:-5].split("_")[1]
-            img_tensor = get_image_as_tensor(data_dir + '\\' + f, pascal=True).to(device)
+            img_tensor = get_image_as_tensor(os.path.join(data_dir, f), pascal=True).to(device)
             data.append((img_tensor, str_to_vector_pascal(target).to(device)))
 
             dump_file = open(file_name + "_pascalvoc_sample", 'wb')
