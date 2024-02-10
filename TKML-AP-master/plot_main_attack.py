@@ -78,12 +78,14 @@ def main(args):
         'inception_v3': 'https://download.pytorch.org/models/inception_v3_google-1a9a5a14.pth'
     }
 
-    model_collections_dict = {
-        "resnet18": models.resnet18(),
-        "resnet34": models.resnet34(),
-        "resnet50": models.resnet50(),
-        "inception_v3": models.inception_v3()
-    }
+    model_collections_dict = {}
+    if model_name in ['resnet18', 'resnet34', 'resnet50', 'inception_v3']:
+        model_collections_dict = {
+            "resnet18": models.resnet18(),
+            "resnet34": models.resnet34(),
+            "resnet50": models.resnet50(),
+            "inception_v3": models.inception_v3()
+        }
 
     # Initialize cuda parameters
     use_cuda = torch.cuda.is_available()
@@ -245,15 +247,15 @@ def main(args):
                                          target_transform=encode_labels)
     elif args.dataset == 'DMNIST':
         DMNIST_samples = utils.get_dmnist_samples(data_dir, device, args.sample_name)
-        valid_loader = DataLoader(DMNIST_samples, batch_size=batch_size, num_workers=4)
+        valid_loader = DataLoader(DMNIST_samples, batch_size=batch_size)
 
     elif args.dataset == 'TMNIST':
         TMNIST_samples = utils.get_tmnist_samples(data_dir, device, args.sample_name)
-        valid_loader = DataLoader(TMNIST_samples, batch_size=batch_size, num_workers=4)
+        valid_loader = DataLoader(TMNIST_samples, batch_size=batch_size)
 
     elif args.dataset == 'PASCAL-VOC':
         PASCALVOC_samples = utils.get_pascalvoc_samples(data_dir, device, args.sample_name)
-        valid_loader = DataLoader(PASCALVOC_samples, batch_size=batch_size, num_workers=4)
+        valid_loader = DataLoader(PASCALVOC_samples, batch_size=batch_size)
 
     # ---------------Test your model here---------------------------------------
     # Load the best weights before testing

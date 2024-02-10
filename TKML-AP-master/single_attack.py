@@ -55,6 +55,7 @@ if __name__ == '__main__':
                         np.save(perturbed_np_path, np.squeeze(np.array(array[4])))
 
                     else:
-                        f = open(attack_failed_path, "w")
+                        f = open("tmp_"+attack_failed_path, "w")
                         f.close()
+                        os.replace("tmp_"+attack_failed_path, attack_failed_path)
                     break

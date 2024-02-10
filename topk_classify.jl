@@ -583,7 +583,6 @@ for model_name in model_names
                                 while true
 
                                     if isfile(attack_failed_path)
-                                        sleep(2)
                                         print("attack FAILED.\n\n")
                                         rm(attack_failed_path)
                                         successful_swaps[top_class, bottom_class] = -1
@@ -626,7 +625,6 @@ for model_name in model_names
                                     end
 
                                     if isfile(perturbed_np_path)
-                                        sleep(2)
                                         perturbed_img = np.load(perturbed_np_path)
                                         if dataset=="pascal-voc"
                                             perturbed_img = imresize(perturbed_img, 300, 300)
@@ -745,7 +743,6 @@ for model_name in model_names
                                 while true
 
                                     if isfile(attack_failed_path)
-                                        sleep(2)
                                         print("attack FAILED.\n\n")
                                         rm(attack_failed_path)
                                         successful_swaps[top_class, bottom_class] = -1
@@ -787,7 +784,6 @@ for model_name in model_names
                                     end
 
                                     if isfile(perturbed_np_path)
-                                        sleep(2)
                                         perturbed_img = np.load(perturbed_np_path)
                                         if dataset=="pascal-voc"
                                             perturbed_img = imresize(perturbed_img, 300, 300)
