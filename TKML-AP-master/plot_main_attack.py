@@ -351,8 +351,8 @@ if __name__ == '__main__':
                         metavar='LR', help='initial learning rate', dest='lr')
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                         help='momentum')
-    parser.add_argument('--gpu', default=0, type=int,
-                        help='GPU id to use.')
+    parser.add_argument('--gpu', default=-1, type=int,
+                        help='GPU id to use. -1 for any available GPU.')
     parser.add_argument('--normalize', default='boxmaxmin', type=str, choices={'mean_std', 'boxmaxmin'},
                         help='optimizer for training')
     parser.add_argument('--opt', default='Adam', type=str, choices={'Adam', 'SGD'}, help='optimizer for training')
@@ -387,6 +387,7 @@ if __name__ == '__main__':
     parser.add_argument('--sample_name', default='all', type=str, help='sample name to attack')
 
     args = parser.parse_args()
-    os.environ["CUDA_VISIBLE_DEVICES"] = '{}'.format(args.gpu)
+    if args.gpu != -1:
+        os.environ["CUDA_VISIBLE_DEVICES"] = '{}'.format(args.gpu)
     # main('./data/', "inception_v3", num=1, lr = [1.5e-4, 5e-2], epochs = 100, batch_size=1, download_data=False, save_results=True)
     main(args)

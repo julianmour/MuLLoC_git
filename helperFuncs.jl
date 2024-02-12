@@ -115,14 +115,3 @@ function init_Ds(mini_eps)
     return (d, sub_d)
 end
 
-# function get_first_true_index(
-#     xs::AbstractArray{T,1},
-# ) where {T<:JuMPLinearType}
-
-#     for (i, a_i) in enumerate(xs)
-#         if value.(a_i) == 1
-#             return i
-#         end
-#     end
-
-# end

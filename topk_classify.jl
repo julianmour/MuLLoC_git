@@ -539,10 +539,9 @@ for model_name in model_names
                 corner_sampling_time = now() - corner_sampling_start_time
 
 
-                print("**************** PRUNING RELATIONS USING ATTACKS ****************\n\n")
+                print("**************** PRUNING RELATIONS USING SWAP ANALYSIS ****************\n\n")
 
-                attacks_time = (now() - now())
-                swap_milps_time = (now() - now())
+                swaps_start_time = now()
                 attacks_classified = 0
                 swap_milps_classified = 0
                 constraints_buffer = []
@@ -555,22 +554,21 @@ for model_name in model_names
 
                     top_average_ranking = filter!(top_class -> top_class in topk, copy(average_ranking))
                     bottom_average_ranking = filter!(bottom_class -> bottom_class in not_topk, copy(average_ranking))
-
+                    
+                    swap_files = Dict()
                     for top_class in topk
                         if classes_classification[top_class] == -1
                             print("Attacking the TOPK label ", string(top_class), ":\n\n")
                             for bottom_class in bottom_average_ranking
-                                attack_start_time = now()
                                 print("Attempting a SWAP ATTACK between labels ", string(top_class), " and ", string(bottom_class), ".\n")
                                 target_labels = filter!(x -> x!=top_class, push!(copy(topk), bottom_class))   #remove the top class from the topk and add the bottom class instaed 
                                 target_labels = target_labels .- 1      # the -1 is due the difference in indexing in python and julia
                                 target_labels_str = replace(string(target_labels), " " => "")
                                 eps_ = eps
                                 command = "python -u plot_main_attack.py --k_value $k --eps $eps_ --app target_attack --target_labels $target_labels_str --label_difficult customized --data $(dataset)_samples --dataset $(uppercase(dataset)) --results $dataset --num_classes $m --arch cnn --defense $(split(model_name, '_')[2]) --complex $complex --image_size $(size(img_org)[1]) --remove_tier_para 0 --norm lInf --sample_name $(img_files[i_idx])"
-                                attack_result_path = joinpath("plot_result_singles", "$(uppercase(dataset))", "customized", "target_attack", "eps_$eps_", "lInf_norm", "def_$(split(model_name, '_')[2])", "image_result_k_$(k)_sample_$(i).npy")
-                                attack_failed_path = joinpath("TKML-AP-master", "attack_failed.txt")
-                                perturbed_path = joinpath("TKML-AP-master", "perturbed_attack.png")
-                                perturbed_np_path = joinpath("TKML-AP-master", "perturbed_attack.npy")
+                                attack_result_path = joinpath("plot_result_singles", "$(uppercase(dataset))", "customized", "target_attack", "eps_$eps_", "lInf_norm", "def_$(split(model_name, '_')[2])", "image_result_k_$(k)_sample_$(i)_$target_labels_str.npy")
+                                attack_failed_path = joinpath("TKML-AP-master", "attack_failed_$(top_class)_$(bottom_class).txt")
+                                perturbed_np_path = joinpath("TKML-AP-master", "perturbed_attack_$(top_class)_$(bottom_class).npy")
                                 
                                 if isfile(joinpath("TKML-AP-master", attack_result_path))
                                     rm(joinpath("TKML-AP-master", attack_result_path))
@@ -582,139 +580,152 @@ for model_name in model_names
                                     rm(attack_failed_path)
                                 end
 
-                                file = open(joinpath("TKML-AP-master", "pyCommand_attack.txt"), "w")
-                                write(file, command*"\n"*attack_result_path)
+                                file = open(joinpath("TKML-AP-master", "pyCommand_attack_$(top_class)_$(bottom_class).txt"), "w")
+                                write(file, command*"\n"*attack_result_path*"\n"*"attack_failed_$(top_class)_$(bottom_class).txt"*"\n"*"perturbed_attack_$(top_class)_$(bottom_class).npy")
                                 close(file)
-                                
-                                while true
 
-                                    if isfile(attack_failed_path)
-                                        print("attack FAILED.\n\n")
-                                        rm(attack_failed_path)
-                                        successful_swaps[top_class, bottom_class] = -1
-                                        attacks_time += (now() - attack_start_time)
+                                swap_files[(top_class, bottom_class)] = (attack_failed_path, perturbed_np_path)
 
-                                        if !skip_mini_milps
-                                            swap_milp_start_time = now()
-                                            d = MIPVerifyMulti.relation_feasibility(
-                                                model, 
-                                                img_, 
-                                                Gurobi.Optimizer, 
-                                                Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                                    "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign)
-                                                epsilons=[eps],
-                                                l1=top_class,
-                                                l2=bottom_class,
-                                                img_idx = i,
-                                                limit_time = mini_milp_time_limit,
-                                                d = d;
-                                            )
-
-                                            mini_milps_num += 1
-
-                                            feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
-                                            print(feasible ? "Couldn't prove infeasibility...\n\n" : "INFEASIBLE ==> label $top_class > label $bottom_class always\n\n")
-
-                                            if !feasible
-                                                always_better_count[top_class] += 1
-                                                always_better_count[bottom_class] += 1
-                                                constraint = Dict()
-                                                constraint["l1"] = top_class
-                                                constraint["relation"] = ">"
-                                                constraint["l2"] = bottom_class
-                                                push!(constraints_buffer, constraint)
-                                            end
-
-                                            swap_milps_time += (now() - swap_milp_start_time)
-
-                                        end
-
-                                        break
-
-                                    end
-
-                                    if isfile(perturbed_np_path)
-                                        perturbed_img = np.load(perturbed_np_path)
-                                        if dataset=="pascal-voc"
-                                            perturbed_img = imresize(perturbed_img, 300, 300)
-                                            perturbed_img = float.(channelview(perturbed_img))
-                                            perturbed_img = permutedims(perturbed_img, (2, 3, 1))
-                                            padded_shape_ = (1, size(perturbed_img)...)
-                                            perturbed_img = reshape(perturbed_img, padded_shape_)
-                                        else
-                                            perturbed_img = convert(Array{Float64}, perturbed_img)
-                                            padded_shape_ = (1, size(perturbed_img)..., 1)
-                                            perturbed_img = reshape(perturbed_img, padded_shape_)
-                                        end
-                                        perturbed_img_result_ = ToSoftmax(model(perturbed_img))
-                                        perturbed_ranking = reverse(sortperm(perturbed_img_result_))
-
-                                        # update matrixes according to image scores
-                                        (gtm, ltm, gtm_diff, ltm_diff) = updateMatrixes(perturbed_img_result_, gtm, ltm)
-
-                                        overall_updated += (gtm_diff + ltm_diff)
-                                        print("attack SUCCEEDED!!!\n\n")
-                                        print("# updated entries = ", gtm_diff + ltm_diff, "\n")
-                                        print("# overall updated entries = ", overall_updated, "\n")
-                                        print("NN result: " , perturbed_img_result_, "\n")
-                                        print("Classes ranking: ", perturbed_ranking, "\n\n")
-                            
-                                        perturbed_topk = perturbed_ranking[1:k]
-                                        for top_class in topk
-                                            if !(top_class in perturbed_topk)
-                                                prev = classes_classification[top_class]
-                                                classes_classification[top_class] = 2
-                                                if prev!=2
-                                                    print("new TOPK class classified: ", top_class,"\n\n")
-                                                    time = now() - start_time
-                                                    classes_classification_time[top_class] = Float64(time.value)
-                                                    classes_classification_part[top_class] = "attacks"
-                                                    attacks_classified += 1
-                                                end
-                                            end
-                                        end
-                                        for not_top_class in not_topk
-                                            if not_top_class in perturbed_topk
-                                                prev = classes_classification[not_top_class]
-                                                classes_classification[not_top_class] = 2
-                                                if prev!=2
-                                                    print("new BOTTOM class classified: ", not_top_class,"\n\n")
-                                                    time = now() - start_time
-                                                    classes_classification_time[not_top_class] = Float64(time.value)
-                                                    classes_classification_part[not_top_class] = "attacks"
-                                                    attacks_classified += 1
-                                                end
-                                            end
-                                        end
-
-                                        rm(perturbed_np_path)
-
-                                        successful_swaps[top_class, bottom_class] = 1
-
-                                        attacks_time += (now() - attack_start_time)
-
-                                        break
-                                    end
-
-                                end
-
-                                # found one successful swap (topk class can also be a bottom class)
-                                if successful_swaps[top_class, bottom_class] == 1
-                                    break
-                                end
-
-                            end
-
-                            # top class always has a higher score than (m-k) other classes
-                            if always_better_count[top_class] == m - k
-                                classes_classification[top_class] = 0
-                                print("new TOP class classified: ", top_class,"\n\n")
-                                time = now() - start_time
-                                classes_classification_time[top_class] = Float64(time.value)
-                                classes_classification_part[top_class] = "swap-milps"
-                                swap_milps_classified += 1
                             end
                         end
+                    end
+
+                    file = open(joinpath("TKML-AP-master", "tmp_pyCommand_attacks_ready.txt"), "w")
+                    close(file)
+                    mv(joinpath("TKML-AP-master", "tmp_pyCommand_attacks_ready.txt"), joinpath("TKML-AP-master", "pyCommand_attacks_ready.txt"))
+
+
+                    while isempty(swap_files) == false
+
+                        for swap_key in keys(swap_files)
+
+                            attack_failed_path = swap_files[swap_key][1]
+                            perturbed_np_path = swap_files[swap_key][2]
+                            (top_class, bottom_class) = swap_key
+
+                            if isfile(attack_failed_path)
+
+                                print("attack FAILED.\n\n")
+                                rm(attack_failed_path)
+                                successful_swaps[top_class, bottom_class] = -1
+
+                                if !skip_mini_milps
+
+                                    mini_milps_num += 1
+
+                                    d = MIPVerifyMulti.relation_feasibility(
+                                        model, 
+                                        img_, 
+                                        Gurobi.Optimizer, 
+                                        Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
+                                            "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                                        epsilons=[eps],
+                                        l1=top_class,
+                                        l2=bottom_class,
+                                        img_idx = i,
+                                        limit_time = mini_milp_time_limit,
+                                        d = d;
+                                    )
+
+                                    feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
+                                    print(feasible ? "Couldn't prove infeasibility...\n\n" : "INFEASIBLE ==> label $top_class > label $bottom_class always\n\n")
+
+                                    if !feasible
+                                        always_better_count[top_class] += 1
+                                        always_better_count[bottom_class] += 1
+                                        constraint = Dict()
+                                        constraint["l1"] = top_class
+                                        constraint["relation"] = ">"
+                                        constraint["l2"] = bottom_class
+                                        push!(constraints_buffer, constraint)
+                                    end
+
+                                end
+
+                                delete!(swap_files, swap_key)
+
+                            end
+
+                            if isfile(perturbed_np_path)
+
+                                perturbed_img = np.load(perturbed_np_path)
+                                if dataset=="pascal-voc"
+                                    perturbed_img = imresize(perturbed_img, 300, 300)
+                                    perturbed_img = float.(channelview(perturbed_img))
+                                    perturbed_img = permutedims(perturbed_img, (2, 3, 1))
+                                    padded_shape_ = (1, size(perturbed_img)...)
+                                    perturbed_img = reshape(perturbed_img, padded_shape_)
+                                else
+                                    perturbed_img = convert(Array{Float64}, perturbed_img)
+                                    padded_shape_ = (1, size(perturbed_img)..., 1)
+                                    perturbed_img = reshape(perturbed_img, padded_shape_)
+                                end
+                                perturbed_img_result_ = ToSoftmax(model(perturbed_img))
+                                perturbed_ranking = reverse(sortperm(perturbed_img_result_))
+
+                                # update matrixes according to image scores
+                                (gtm, ltm, gtm_diff, ltm_diff) = updateMatrixes(perturbed_img_result_, gtm, ltm)
+
+                                overall_updated += (gtm_diff + ltm_diff)
+                                print("attack SUCCEEDED!!!\n\n")
+                                print("# updated entries = ", gtm_diff + ltm_diff, "\n")
+                                print("# overall updated entries = ", overall_updated, "\n")
+                                print("NN result: " , perturbed_img_result_, "\n")
+                                print("Classes ranking: ", perturbed_ranking, "\n\n")
+                    
+                                perturbed_topk = perturbed_ranking[1:k]
+                                for top_class in topk
+                                    if !(top_class in perturbed_topk)
+                                        prev = classes_classification[top_class]
+                                        classes_classification[top_class] = 2
+                                        if prev!=2
+                                            print("new TOPK class classified: ", top_class,"\n\n")
+                                            time = now() - start_time
+                                            classes_classification_time[top_class] = Float64(time.value)
+                                            classes_classification_part[top_class] = "attacks"
+                                            attacks_classified += 1
+                                        end
+                                    end
+                                end
+                                for not_top_class in not_topk
+                                    if not_top_class in perturbed_topk
+                                        prev = classes_classification[not_top_class]
+                                        classes_classification[not_top_class] = 2
+                                        if prev!=2
+                                            print("new BOTTOM class classified: ", not_top_class,"\n\n")
+                                            time = now() - start_time
+                                            classes_classification_time[not_top_class] = Float64(time.value)
+                                            classes_classification_part[not_top_class] = "attacks"
+                                            attacks_classified += 1
+                                        end
+                                    end
+                                end
+
+                                rm(perturbed_np_path)
+
+                                successful_swaps[top_class, bottom_class] = 1
+
+                                delete!(swap_files, swap_key)
+
+                            end
+
+                        end
+
+                        # found one successful swap (topk class can also be a bottom class)
+                        # if successful_swaps[top_class, bottom_class] == 1
+                        #     break
+                        # end
+
+                    end
+
+                    # top class always has a higher score than (m-k) other classes
+                    if always_better_count[top_class] == m - k
+                        classes_classification[top_class] = 0
+                        print("new TOP class classified: ", top_class,"\n\n")
+                        time = now() - start_time
+                        classes_classification_time[top_class] = Float64(time.value)
+                        classes_classification_part[top_class] = "swap-milps"
+                        swap_milps_classified += 1
                     end
 
                     
@@ -722,7 +733,6 @@ for model_name in model_names
                         if classes_classification[bottom_class] == -1
                             print("Attacking the BOTTOM label ", string(bottom_class), ":\n\n")
                             for top_class in reverse(top_average_ranking)
-                                attack_start_time = now()
                                 print("Attempting a SWAP ATTACK between labels ", string(top_class), " and ", string(bottom_class), ".\n")
                                 if successful_swaps[top_class, bottom_class] == -1   # already tried this swap in topk attacks
                                     print("attack FAILED (from previous attempt).\n\n")
@@ -733,10 +743,9 @@ for model_name in model_names
                                 target_labels_str = replace(string(target_labels), " " => "")
                                 eps_ = eps
                                 command = "python -u plot_main_attack.py --k_value $k --eps $eps_ --app target_attack --target_labels $target_labels_str --label_difficult customized --data $(dataset)_samples --dataset $(uppercase(dataset)) --results $dataset --num_classes $m --arch cnn --defense $(split(model_name, '_')[2]) --complex $complex --image_size $(size(img_org)[1]) --remove_tier_para 0 --norm lInf --sample_name $(img_files[i_idx])"
-                                attack_result_path = joinpath("plot_result_singles", "$(uppercase(dataset))", "customized", "target_attack", "eps_$eps_", "lInf_norm", "def_$(split(model_name, '_')[2])", "image_result_k_$(k)_sample_$(i).npy")
-                                attack_failed_path = joinpath("TKML-AP-master", "attack_failed.txt")
-                                perturbed_path = joinpath("TKML-AP-master", "perturbed_attack.png")
-                                perturbed_np_path = joinpath("TKML-AP-master", "perturbed_attack.npy")
+                                attack_result_path = joinpath("plot_result_singles", "$(uppercase(dataset))", "customized", "target_attack", "eps_$eps_", "lInf_norm", "def_$(split(model_name, '_')[2])", "image_result_k_$(k)_sample_$(i)_$target_labels_str.npy")
+                                attack_failed_path = joinpath("TKML-AP-master", "attack_failed_$(top_class)_$(bottom_class).txt")
+                                perturbed_np_path = joinpath("TKML-AP-master", "perturbed_attack_$(top_class)_$(bottom_class).npy")
                                 
                                 if isfile(joinpath("TKML-AP-master", attack_result_path))
                                     rm(joinpath("TKML-AP-master", attack_result_path))
@@ -748,145 +757,158 @@ for model_name in model_names
                                     rm(attack_failed_path)
                                 end
 
-                                file = open(joinpath("TKML-AP-master", "pyCommand_attack.txt"), "w")
-                                write(file, command*"\n"*attack_result_path)
+                                file = open(joinpath("TKML-AP-master", "pyCommand_attack_$(top_class)_$(bottom_class).txt"), "w")
+                                write(file, command*"\n"*attack_result_path*"\n"*"attack_failed_$(top_class)_$(bottom_class).txt"*"\n"*"perturbed_attack_$(top_class)_$(bottom_class).npy")
                                 close(file)
-                                
-                                while true
 
-                                    if isfile(attack_failed_path)
-                                        print("attack FAILED.\n\n")
-                                        rm(attack_failed_path)
-                                        successful_swaps[top_class, bottom_class] = -1
-                                        attacks_time += (now() - attack_start_time)
-
-                                        if !skip_mini_milps
-                                            swap_milp_start_time = now()
-                                            d = MIPVerifyMulti.relation_feasibility(
-                                                model, 
-                                                img_, 
-                                                Gurobi.Optimizer, 
-                                                Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                                    "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign)
-                                                epsilons=[eps],
-                                                l1=top_class,
-                                                l2=bottom_class,
-                                                img_idx = i,
-                                                limit_time = mini_milp_time_limit,
-                                                d = d;
-                                            )
-
-                                            mini_milps_num += 1
-
-                                            feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
-                                            print(feasible ? "Couldn't prove infeasibility...\n\n" : "INFEASIBLE ==> label $top_class > label $bottom_class always\n\n")
-
-                                            if !feasible
-                                                always_better_count[top_class] += 1
-                                                always_better_count[bottom_class] += 1
-                                                constraint = Dict()
-                                                constraint["l1"] = top_class
-                                                constraint["relation"] = ">"
-                                                constraint["l2"] = bottom_class
-                                                push!(constraints_buffer, constraint)
-                                            end
-
-                                            swap_milps_time += (now() - swap_milp_start_time)
-
-                                        end
-
-                                        break
-                                    end
-
-                                    if isfile(perturbed_np_path)
-                                        perturbed_img = np.load(perturbed_np_path)
-                                        if dataset=="pascal-voc"
-                                            perturbed_img = imresize(perturbed_img, 300, 300)
-                                            perturbed_img = float.(channelview(perturbed_img))
-                                            perturbed_img = permutedims(perturbed_img, (2, 3, 1))
-                                            padded_shape_ = (1, size(perturbed_img)...)
-                                            perturbed_img = reshape(perturbed_img, padded_shape_)
-                                        else
-                                            perturbed_img = convert(Array{Float64}, perturbed_img)
-                                            padded_shape_ = (1, size(perturbed_img)..., 1)
-                                            perturbed_img = reshape(perturbed_img, padded_shape_)
-                                        end
-                                        perturbed_img_result_ = ToSoftmax(model(perturbed_img))
-                                        perturbed_ranking = reverse(sortperm(perturbed_img_result_))
-
-                                        # update matrixes according to image scores
-                                        (gtm, ltm, gtm_diff, ltm_diff) = updateMatrixes(perturbed_img_result_, gtm, ltm)
-
-                                        overall_updated += (gtm_diff + ltm_diff)
-                                        print("attack SUCCEEDED!!!\n\n")
-                                        print("# updated entries = ", gtm_diff + ltm_diff, "\n")
-                                        print("# overall updated entries = ", overall_updated, "\n")
-                                        print("NN result: " , perturbed_img_result_, "\n")
-                                        print("Classes ranking: ", perturbed_ranking, "\n\n")
-                            
-                                        perturbed_topk = perturbed_ranking[1:k]
-                                        for top_class in topk
-                                            if !(top_class in perturbed_topk)
-                                                prev = classes_classification[top_class]
-                                                classes_classification[top_class] = 2
-                                                if prev!=2
-                                                    print("new TOPK class classified: ", top_class,"\n\n")
-                                                    time = now() - start_time
-                                                    classes_classification_time[top_class] = Float64(time.value)
-                                                    classes_classification_part[top_class] = "attacks"
-                                                    attacks_classified += 1
-                                                end
-                                            end
-                                        end
-                                        for not_top_class in not_topk
-                                            if not_top_class in perturbed_topk
-                                                prev = classes_classification[not_top_class]
-                                                classes_classification[not_top_class] = 2
-                                                if prev!=2
-                                                    print("new BOTTOM class classified: ", not_top_class,"\n\n")
-                                                    time = now() - start_time
-                                                    classes_classification_time[not_top_class] = Float64(time.value)
-                                                    classes_classification_part[not_top_class] = "attacks"
-                                                    attacks_classified += 1
-                                                end
-                                            end
-                                        end
-
-                                        rm(perturbed_np_path)
-
-                                        successful_swaps[top_class, bottom_class] = 1
-
-                                        attacks_time += (now() - attack_start_time)
-
-                                        break
-                                    end
-
-                                end
-
-                                # found one successful swap (topk class can also be a bottom class)
-                                if successful_swaps[top_class, bottom_class] == 1
-                                    break
-                                end
+                                swap_files[(top_class, bottom_class)] = (attack_failed_path, perturbed_np_path)
 
                             end
-
-                            # bottom class always has a lower score than k other classes
-                            if always_better_count[bottom_class] == k
-                                classes_classification[bottom_class] = 1
-                                print("new BOTTOM class classified: ", bottom_class,"\n\n")
-                                time = now() - start_time
-                                classes_classification_time[bottom_class] = Float64(time.value)
-                                classes_classification_part[bottom_class] = "swap-milps"
-                                swap_milps_classified += 1
-                            end
-
                         end
                     end
 
+                    file = open(joinpath("TKML-AP-master", "tmp_pyCommand_attacks_ready.txt"), "w")
+                    close(file)
+                    mv(joinpath("TKML-AP-master", "tmp_pyCommand_attacks_ready.txt"), joinpath("TKML-AP-master", "pyCommand_attacks_ready.txt"))
+                                
+                    while isempty(swap_files) == false
+
+                        for swap_key in keys(swap_files)
+
+                            attack_failed_path = swap_files[swap_key][1]
+                            perturbed_np_path = swap_files[swap_key][2]
+                            (top_class, bottom_class) = swap_key
+
+                            if isfile(attack_failed_path)
+                                print("attack FAILED.\n\n")
+                                rm(attack_failed_path)
+                                successful_swaps[top_class, bottom_class] = -1
+
+                                if !skip_mini_milps
+
+                                    mini_milps_num += 1
+
+                                    d = MIPVerifyMulti.relation_feasibility(
+                                        model, 
+                                        img_, 
+                                        Gurobi.Optimizer, 
+                                        Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
+                                            "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                                        epsilons=[eps],
+                                        l1=top_class,
+                                        l2=bottom_class,
+                                        img_idx = i,
+                                        limit_time = mini_milp_time_limit,
+                                        d = d;
+                                    )
+
+                                    feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
+                                    print(feasible ? "Couldn't prove infeasibility...\n\n" : "INFEASIBLE ==> label $top_class > label $bottom_class always\n\n")
+
+                                    if !feasible
+                                        always_better_count[top_class] += 1
+                                        always_better_count[bottom_class] += 1
+                                        constraint = Dict()
+                                        constraint["l1"] = top_class
+                                        constraint["relation"] = ">"
+                                        constraint["l2"] = bottom_class
+                                        push!(constraints_buffer, constraint)
+                                    end
+
+                                end
+
+                                delete!(swap_files, swap_key)
+
+                            end
+
+                            if isfile(perturbed_np_path)
+                                perturbed_img = np.load(perturbed_np_path)
+                                if dataset=="pascal-voc"
+                                    perturbed_img = imresize(perturbed_img, 300, 300)
+                                    perturbed_img = float.(channelview(perturbed_img))
+                                    perturbed_img = permutedims(perturbed_img, (2, 3, 1))
+                                    padded_shape_ = (1, size(perturbed_img)...)
+                                    perturbed_img = reshape(perturbed_img, padded_shape_)
+                                else
+                                    perturbed_img = convert(Array{Float64}, perturbed_img)
+                                    padded_shape_ = (1, size(perturbed_img)..., 1)
+                                    perturbed_img = reshape(perturbed_img, padded_shape_)
+                                end
+                                perturbed_img_result_ = ToSoftmax(model(perturbed_img))
+                                perturbed_ranking = reverse(sortperm(perturbed_img_result_))
+
+                                # update matrixes according to image scores
+                                (gtm, ltm, gtm_diff, ltm_diff) = updateMatrixes(perturbed_img_result_, gtm, ltm)
+
+                                overall_updated += (gtm_diff + ltm_diff)
+                                print("attack SUCCEEDED!!!\n\n")
+                                print("# updated entries = ", gtm_diff + ltm_diff, "\n")
+                                print("# overall updated entries = ", overall_updated, "\n")
+                                print("NN result: " , perturbed_img_result_, "\n")
+                                print("Classes ranking: ", perturbed_ranking, "\n\n")
+                    
+                                perturbed_topk = perturbed_ranking[1:k]
+                                for top_class in topk
+                                    if !(top_class in perturbed_topk)
+                                        prev = classes_classification[top_class]
+                                        classes_classification[top_class] = 2
+                                        if prev!=2
+                                            print("new TOPK class classified: ", top_class,"\n\n")
+                                            time = now() - start_time
+                                            classes_classification_time[top_class] = Float64(time.value)
+                                            classes_classification_part[top_class] = "attacks"
+                                            attacks_classified += 1
+                                        end
+                                    end
+                                end
+                                for not_top_class in not_topk
+                                    if not_top_class in perturbed_topk
+                                        prev = classes_classification[not_top_class]
+                                        classes_classification[not_top_class] = 2
+                                        if prev!=2
+                                            print("new BOTTOM class classified: ", not_top_class,"\n\n")
+                                            time = now() - start_time
+                                            classes_classification_time[not_top_class] = Float64(time.value)
+                                            classes_classification_part[not_top_class] = "attacks"
+                                            attacks_classified += 1
+                                        end
+                                    end
+                                end
+
+                                rm(perturbed_np_path)
+
+                                successful_swaps[top_class, bottom_class] = 1
+
+                                delete!(swap_files, swap_key)
+
+                            end
+
+                        end
+
+                        # # found one successful swap (topk class can also be a bottom class)
+                        # if successful_swaps[top_class, bottom_class] == 1
+                        #     break
+                        # end
+
+                    end
+
+                    # bottom class always has a lower score than k other classes
+                    if always_better_count[bottom_class] == k
+                        classes_classification[bottom_class] = 1
+                        print("new BOTTOM class classified: ", bottom_class,"\n\n")
+                        time = now() - start_time
+                        classes_classification_time[bottom_class] = Float64(time.value)
+                        classes_classification_part[bottom_class] = "swap-milps"
+                        swap_milps_classified += 1
+                    end
+
                     print("Classes classification = ", classes_classification, "\n\n")
+
                 else
                     print("skipping attacks...\n\n")
                 end
+
+                swaps_time = now() - swaps_start_time
 
 
                 print("**************** CLASSIFYING LABELS USING A MILP VERIFIER ****************\n\n")
@@ -1255,9 +1277,9 @@ for model_name in model_names
                 Part_of_classification = classes_classification_part[ranking])
                 CSV.write(joinpath("$output_path", "classification_summary.csv"), df1, writeheader=true)
 
-                df2 = DataFrame(Part = ["Random Sampling", "Corner Sampling", "Attacks", "Swap-Milps", "MILP Verifier", "Total"],
-                Execution_time_minutes = [Float64(random_sampling_time.value), Float64(corner_sampling_time.value), Float64(attacks_time.value), Float64(swap_milps_time.value),Float64(verifier_time.value), Float64(random_sampling_time.value)+Float64(corner_sampling_time.value)+Float64(attacks_time.value)+Float64(swap_milps_time.value)+Float64(verifier_time.value)]./60000,
-                Num_of_labels_classified = [random_sampling_classified, corner_sampling_classified, attacks_classified, swap_milps_classified, verifier_classified, random_sampling_classified + corner_sampling_classified + attacks_classified + swap_milps_classified + verifier_classified])
+                df2 = DataFrame(Part = ["Random Sampling", "Corner Sampling", "Attacks", "Swap-Milps", "Total swap analysis", "MILP Verifier", "Total"],
+                Execution_time_minutes = [Float64(random_sampling_time.value), Float64(corner_sampling_time.value), "-", "-", Float64(swaps_time.value), Float64(verifier_time.value), Float64(random_sampling_time.value)+Float64(corner_sampling_time.value)+Float64(attacks_time.value)+Float64(swap_milps_time.value)+Float64(verifier_time.value)]./60000,
+                Num_of_labels_classified = [random_sampling_classified, corner_sampling_classified, attacks_classified, swap_milps_classified, (attacks_classified + swap_milps_classified), verifier_classified, random_sampling_classified + corner_sampling_classified + attacks_classified + swap_milps_classified + verifier_classified])
                 CSV.write(joinpath("$output_path", "exec_summary.csv"), df2, writeheader=true)
 
                 df3 = DataFrame(MILP_TYPE = ["SWAP-MILP", "REGULAR-MILP", "SUPER-MILP"],

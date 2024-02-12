@@ -559,9 +559,9 @@ def tkmlap(args, model, device, val_loader):
                         plot_list = np.asarray(plot_list, dtype=object)
                         file_name, _ = os.path.splitext(args.sample_name)
                         np.save(
-                            './plot_result_singles/{}/{}/{}/eps_{}/{}_norm/def_{}/image_result_k_{}_sample_{}'.format(
+                            './plot_result_singles/{}/{}/{}/eps_{}/{}_norm/def_{}/image_result_k_{}_sample_{}_{}'.format(
                                 args.dataset, args.label_difficult, args.app, args.eps,
-                                args.norm, args.defense, args.k_value, file_name)
+                                args.norm, args.defense, args.k_value, file_name, args.target_labels)
                             , plot_list)
 
                     if attack_success:
