@@ -115,3 +115,40 @@ function init_Ds(mini_eps)
     return (d, sub_d)
 end
 
+function prepare_runs()
+    runs = []
+#     for eps in [0.0001, 0.2]
+    for eps in [0.2]
+#         for k in [2, 3]
+        for k in [3]
+            push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k))
+        end
+    end
+
+    for eps in [0.0001, 0.0005]
+        for k in [2, 3]
+            push!(runs, Dict("dataset" => "tmnist", "model" => "tmnist_noDef_x2", "eps" => eps, "k" => k))
+        end
+    end
+    push!(runs, Dict("dataset" => "tmnist", "model" => "tmnist_noDef_x2", "eps" => 0.01, "k" => 2))
+    push!(runs, Dict("dataset" => "tmnist", "model" => "tmnist_noDef_x2", "eps" => 0.0002, "k" => 3))
+
+    for eps in [0.0001, 0.0002, 0.0005, 0.001]
+        for k in [2, 3]
+            push!(runs, Dict("dataset" => "tmnist", "model" => "tmnist_noDef_x3", "eps" => eps, "k" => k))
+        end
+    end
+
+    for eps in [0.0001, 0.0005]
+        for k in [3, 4]
+            push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => eps, "k" => k))
+        end
+    end
+    push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.001, "k" => 3))
+
+    push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.0001, "k" => "gt"))
+    push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.0005, "k" => "gt"))
+
+    return runs
+end
+
