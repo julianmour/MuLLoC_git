@@ -34,20 +34,36 @@ np = pyimport("numpy")
 
 runs = prepare_runs()
 
-skip_sampling = false
-const DEFAULT_RANDOM_SAMPLING_DURATION = 1
-const DEFAULT_CORNERS_SAMPLING_DURATION = 1
+runs = prepare_baseline_runs()
 
-skip_attacking = false
-skip_mini_milps = false
+skip_sampling = true
+const DEFAULT_RANDOM_SAMPLING_DURATION = 0.25
+const DEFAULT_CORNERS_SAMPLING_DURATION = 0.25
+
+skip_attacking = true
+skip_mini_milps = true
 const DEFAULT_MINI_MILP_TIME_LIMIT = 10
 
-skip_super_milps = false
+skip_super_milps = true
 const DEFAULT_HEURISTICS_PARAMETER = 0.05
 
 skip_sub_milps = true
 mini_eps = 0.001
 
+continue_check = true
+
+# single_sample = "0_321"
+# runs = prepare_runs_single_tmnist_noDef_x2()
+
+# single_sample = "img11_4-8-10-14"
+# runs = prepare_runs_single_pascal_voc_noDef_x3()
+
+single_sample_mode = false
+
+# pascal_voc_x3_0001 = ["img1_0", "img5_2", "img8_8-10-14-19", "img10_5-6-13-14", "img11_4-8-10-14", "img15_7",
+# "img16_11", "img19_5-6-13-14", "img20_4-8-10-14-19", "img21_4-8-10-14", "img22_4-8-10-14", "img24_8-10-14-15",
+# "img25_6", "img27_6", "img29_2"]
+# runs = [Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.001, "k" => 4)]
 
 for args in runs
     model_name = args["model"]
@@ -231,7 +247,12 @@ for args in runs
     skip_milp_relations_txt = skip_mini_milps ? "_skipMiniMilps" : ""
     # skip_sub_milps_txt = skip_sub_milps ? "_skipSubMilps" : ""
     skip_super_milps_txt = skip_super_milps ? "_skipSuperMilps" : ""
-    results_folder = joinpath("results", dataset, model_name, "k_$k_", "eps_$eps$skip_sampling_txt$skip_attacking_txt$skip_milp_relations_txt$skip_super_milps_txt")
+
+    if !single_sample_mode
+        results_folder = joinpath("results", dataset, model_name, "k_$k_", "eps_$eps$skip_sampling_txt$skip_attacking_txt$skip_milp_relations_txt$skip_super_milps_txt")
+    else
+        results_folder = joinpath("single_results", dataset, model_name, "k_$k_", "eps_$eps$skip_sampling_txt$skip_attacking_txt$skip_milp_relations_txt$skip_super_milps_txt")
+    end
 
     if !isdir(results_folder)
         mkpath(results_folder)
@@ -243,21 +264,29 @@ for args in runs
     start_from_img_idx = 1
     till_img_idx = 30
 
-    if model_name == "dmnist_noDef_x2" && k_ == 3 && eps == 0.2
-        start_from_img_idx = 27
-    end
+#     if k_ == 4 && eps == 0.001
+#         start_from_img_idx = 1
+#         global continue_check = false
+#     elseif continue_check
+#         continue
+#     end
 
     # skip = [1,3,5,7,9,11,13,15,17,19]
     skip = []
 
     mini_milp_time_limit = DEFAULT_MINI_MILP_TIME_LIMIT
 
+    counter_pasc = 0
 
     for (i_idx, i) in enumerate(img_names)
 
         mini_milps_num = 0
         super_milps_num = 0
         regular_milps_num = 0
+
+        if single_sample_mode && (!(i == single_sample))
+            continue
+        end
 
         if i_idx < start_from_img_idx
             continue
@@ -266,6 +295,16 @@ for args in runs
         if i_idx in skip
             continue
         end
+
+#         if (!(i in pascal_voc_x3_0001))
+#             continue
+#         end
+
+#         counter_pasc = counter_pasc + 1
+
+#         if (counter_pasc < 12)
+#             continue
+#         end
 
         output_path = joinpath("$results_folder", "$i")
         if !isdir(output_path)
@@ -392,7 +431,7 @@ for args in runs
                     print("# overall updated entries = ", overall_updated, "\n")
                     print("NN result: " , sampled_img_result_, "\n")
                     print("Classes ranking: ", sampled_ranking, "\n\n")
-                    stop_sampling_timer = now()
+#                     stop_sampling_timer = now()
                 end
 
                 sampled_topk = sampled_ranking[1:k]
@@ -460,8 +499,10 @@ for args in runs
 
             corner_sampling_start_time = now()
             si_idx = 1
+            keep_generating = true
+
             stop_sampling_timer = now()
-            while true
+            while keep_generating
 
                 if all(x -> x != -1.0, classes_classification)  # all labels classified
                     break
@@ -508,6 +549,7 @@ for args in runs
                             classes_classification_time[top_class] = Float64(time.value)
                             classes_classification_part[top_class] = "corner sampling"
                             corner_sampling_classified += 1
+                            stop_sampling_timer = now()
                         end
                     end
                 end
@@ -528,12 +570,13 @@ for args in runs
                             classes_classification_time[not_top_class] = Float64(time.value)
                             classes_classification_part[not_top_class] = "corner sampling"
                             corner_sampling_classified += 1
+                            stop_sampling_timer = now()
                         end
                     end
                 end
 
                 if Float64((now() - stop_sampling_timer).value)/60000 >= corners_sampling_duration
-                    break
+                    keep_generating = false
                 end
 
                 si_idx += 1
@@ -574,7 +617,7 @@ for args in runs
                         target_labels = target_labels .- 1      # the -1 is due the difference in indexing in python and julia
                         target_labels_str = replace(string(target_labels), " " => "")
                         eps_ = eps
-                        command = "python -u plot_main_attack.py --k_value $k --eps $eps_ --app target_attack --target_labels $target_labels_str --label_difficult customized --data $(dataset)_samples --dataset $(uppercase(dataset)) --results $dataset --num_classes $m --arch cnn --defense $(split(model_name, '_')[2]) --complex $complex --image_size $(size(img_org)[1]) --remove_tier_para 0 --norm lInf --sample_name $(img_files[i_idx])"
+                        command = "python3.8 -u plot_main_attack.py --k_value $k --eps $eps_ --app target_attack --target_labels $target_labels_str --label_difficult customized --data $(dataset)_samples --dataset $(uppercase(dataset)) --results $dataset --num_classes $m --arch cnn --defense $(split(model_name, '_')[2]) --complex $complex --image_size $(size(img_org)[1]) --remove_tier_para 0 --norm lInf --sample_name $(img_files[i_idx])"
                         attack_result_path = joinpath("plot_result_singles", "$(uppercase(dataset))", "customized", "target_attack", "eps_$eps_", "lInf_norm", "def_$(split(model_name, '_')[2])", "image_result_k_$(k)_sample_$(i)_$target_labels_str.npy")
                         attack_failed_path = joinpath("TKML-AP-master", "attack_failed_$(top_class)_$(bottom_class).txt")
                         perturbed_np_path = joinpath("TKML-AP-master", "perturbed_attack_$(top_class)_$(bottom_class).npy")
@@ -622,7 +665,7 @@ for args in runs
                         rm(attack_failed_path)
                         successful_swaps[top_class, bottom_class] = -1
 
-                        if !skip_mini_milps
+                        if (!skip_mini_milps) && (ltm[bottom_class, top_class]==-1)
 
                             mini_milps_num += 1
 
@@ -651,11 +694,51 @@ for args in runs
                                 constraint["relation"] = ">"
                                 constraint["l2"] = bottom_class
                                 push!(constraints_buffer, constraint)
-                            end
+                                ltm[bottom_class, top_class] = 1
+                                gtm[top_class, bottom_class] = 1
+                                gtm[bottom_class, top_class] = 0
+                                ltm[top_class, bottom_class] = 0
+                            else
+                                perturbed_output = value.(d[:Output])
+                                perturbed_ranking = reverse(sortperm(perturbed_output))
 
+                                # update matrixes according to image scores
+                                (gtm, ltm, gtm_diff, ltm_diff) = updateMatrixes(perturbed_output, gtm, ltm)
+
+                                perturbed_topk = perturbed_ranking[1:k]
+                                for top_class in topk
+                                    if !(top_class in perturbed_topk)
+                                        prev = classes_classification[top_class]
+                                        classes_classification[top_class] = 2
+                                        if prev!=2
+                                            print("new TOPK class classified: ", top_class,"\n\n")
+                                            time = now() - start_time
+                                            classes_classification_time[top_class] = Float64(time.value)
+                                            classes_classification_part[top_class] = "attacks"
+                                            attacks_classified += 1
+                                        end
+                                    end
+                                end
+                                for not_top_class in not_topk
+                                    if not_top_class in perturbed_topk
+                                        prev = classes_classification[not_top_class]
+                                        classes_classification[not_top_class] = 2
+                                        if prev!=2
+                                            print("new BOTTOM class classified: ", not_top_class,"\n\n")
+                                            time = now() - start_time
+                                            classes_classification_time[not_top_class] = Float64(time.value)
+                                            classes_classification_part[not_top_class] = "attacks"
+                                            attacks_classified += 1
+                                        end
+                                    end
+                                end
+                            end
+                        else
+                            print("\n\n skipping swap-milp! \n\n")
                         end
 
                         delete!(swap_files, swap_key)
+                        print("Remaining swaps: $(length(swap_files))\n")
 
                     end
 
@@ -720,6 +803,7 @@ for args in runs
                         successful_swaps[top_class, bottom_class] = 1
 
                         delete!(swap_files, swap_key)
+                        print("Remaining swaps: $(length(swap_files))\n")
 
                     end
 
@@ -758,7 +842,7 @@ for args in runs
                         target_labels = target_labels .- 1      # the -1 is due the difference in indexing in python and julia
                         target_labels_str = replace(string(target_labels), " " => "")
                         eps_ = eps
-                        command = "python -u plot_main_attack.py --k_value $k --eps $eps_ --app target_attack --target_labels $target_labels_str --label_difficult customized --data $(dataset)_samples --dataset $(uppercase(dataset)) --results $dataset --num_classes $m --arch cnn --defense $(split(model_name, '_')[2]) --complex $complex --image_size $(size(img_org)[1]) --remove_tier_para 0 --norm lInf --sample_name $(img_files[i_idx])"
+                        command = "python3.8 -u plot_main_attack.py --k_value $k --eps $eps_ --app target_attack --target_labels $target_labels_str --label_difficult customized --data $(dataset)_samples --dataset $(uppercase(dataset)) --results $dataset --num_classes $m --arch cnn --defense $(split(model_name, '_')[2]) --complex $complex --image_size $(size(img_org)[1]) --remove_tier_para 0 --norm lInf --sample_name $(img_files[i_idx])"
                         attack_result_path = joinpath("plot_result_singles", "$(uppercase(dataset))", "customized", "target_attack", "eps_$eps_", "lInf_norm", "def_$(split(model_name, '_')[2])", "image_result_k_$(k)_sample_$(i)_$target_labels_str.npy")
                         attack_failed_path = joinpath("TKML-AP-master", "attack_failed_$(top_class)_$(bottom_class).txt")
                         perturbed_np_path = joinpath("TKML-AP-master", "perturbed_attack_$(top_class)_$(bottom_class).npy")
@@ -805,7 +889,7 @@ for args in runs
                         rm(attack_failed_path)
                         successful_swaps[top_class, bottom_class] = -1
 
-                        if !skip_mini_milps
+                        if (!skip_mini_milps) && (ltm[bottom_class, top_class] == -1)
 
                             mini_milps_num += 1
 
@@ -834,6 +918,44 @@ for args in runs
                                 constraint["relation"] = ">"
                                 constraint["l2"] = bottom_class
                                 push!(constraints_buffer, constraint)
+                                ltm[bottom_class, top_class] = 1
+                                gtm[top_class, bottom_class] = 1
+                                gtm[bottom_class, top_class] = 0
+                                ltm[top_class, bottom_class] = 0
+                            else
+                                perturbed_output = value.(d[:Output])
+                                perturbed_ranking = reverse(sortperm(perturbed_output))
+
+                                # update matrixes according to image scores
+                                (gtm, ltm, gtm_diff, ltm_diff) = updateMatrixes(perturbed_output, gtm, ltm)
+
+                                perturbed_topk = perturbed_ranking[1:k]
+                                for top_class in topk
+                                    if !(top_class in perturbed_topk)
+                                        prev = classes_classification[top_class]
+                                        classes_classification[top_class] = 2
+                                        if prev!=2
+                                            print("new TOPK class classified: ", top_class,"\n\n")
+                                            time = now() - start_time
+                                            classes_classification_time[top_class] = Float64(time.value)
+                                            classes_classification_part[top_class] = "attacks"
+                                            attacks_classified += 1
+                                        end
+                                    end
+                                end
+                                for not_top_class in not_topk
+                                    if not_top_class in perturbed_topk
+                                        prev = classes_classification[not_top_class]
+                                        classes_classification[not_top_class] = 2
+                                        if prev!=2
+                                            print("new BOTTOM class classified: ", not_top_class,"\n\n")
+                                            time = now() - start_time
+                                            classes_classification_time[not_top_class] = Float64(time.value)
+                                            classes_classification_part[not_top_class] = "attacks"
+                                            attacks_classified += 1
+                                        end
+                                    end
+                                end
                             end
 
                         end
@@ -1018,7 +1140,8 @@ for args in runs
                                 "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
                                 "MIPFocus" => 1,
                                 "Heuristics" => DEFAULT_HEURISTICS_PARAMETER,
-                                "ImproveStartTime" => 0.0),
+                                "ImproveStartTime" => 0.0,
+                                "Threads" => 128),
                             epsilons=[eps],
                             norm_order = Inf,
                             multilabel = k,
@@ -1086,7 +1209,11 @@ for args in runs
                         invert_target_selection = true,
                         Gurobi.Optimizer,
                         Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign),
+                                "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                                "MIPFocus" => 1,
+                                "Heuristics" => DEFAULT_HEURISTICS_PARAMETER,
+                                "ImproveStartTime" => 0.0,
+                                "Threads" => 128),
                         epsilons=[eps],
                         norm_order = Inf,
                         multilabel = k,
@@ -1099,9 +1226,11 @@ for args in runs
                 regular_milps_num += 1
 
                 constraints_buffer = []
-                RL = -d[:BestObjective]
-                print("\n\nRL = "*string(RL)*"\n")
-                robust = (RL>0)
+                feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
+                robust = !feasible
+#                 RL = -d[:BestObjective]
+#                 print("\n\nRL = "*string(RL)*"\n")
+#                 robust = (RL>0)
                 if robust
                     print("ROBUST\n\n")
                     classes_classification[top_class] = 0   # always in topk
@@ -1190,7 +1319,9 @@ for args in runs
                                 "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
                                 "MIPFocus" => 1,
                                 "Heuristics" => DEFAULT_HEURISTICS_PARAMETER,
-                                "ImproveStartTime" => 0.0),
+                                "ImproveStartTime" => 0.0,
+                                "Threads" => 128),
+#                                 "Cutoff" => 0),
                             epsilons=[eps],
                             norm_order = Inf,
                             multilabel = k,
@@ -1259,7 +1390,11 @@ for args in runs
                     invert_target_selection = true,
                     Gurobi.Optimizer,
                     Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                                "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                                "MIPFocus" => 1,
+                                "Heuristics" => DEFAULT_HEURISTICS_PARAMETER,
+                                "ImproveStartTime" => 0.0,
+                                "Threads" => 128),
                     epsilons=[eps],
                     norm_order = Inf,
                     multilabel = k,
@@ -1272,9 +1407,11 @@ for args in runs
                 regular_milps_num += 1
 
                 constraints_buffer = []
-                RL = d[:BestObjective]
-                print("\n\nRL = "*string(RL)*"\n")
-                robust = (RL>0)
+                feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
+                robust = !feasible
+#                 RL = d[:BestObjective]
+#                 print("\n\nRL = "*string(RL)*"\n")
+#                 robust = (RL>0)
                 if robust
                     print("ROBUST\n\n")
                     classes_classification[bottom_class] = 1   # always not in topk
