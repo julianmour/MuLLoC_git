@@ -34,7 +34,7 @@ function updateMatrixes(scores, gtm, ltm)
     gtm_old = copy(gtm)
     ltm_old = copy(ltm)
     for (class1, score1) in enumerate(scores)
-        for (class2, score2) in enumerate(scores[class1+1:end])
+        for (class2, score2) in enumerate(scores)
             if score1 < score2
                 gtm[class1, class2] = 0
             else
@@ -117,10 +117,8 @@ end
 
 function prepare_runs()
     runs = []
-#     for eps in [0.0001, 0.2]
-    for eps in [0.2]
-#         for k in [2, 3]
-        for k in [3]
+    for eps in [0.0001, 0.2]
+        for k in [2, 3]
             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k))
         end
     end
@@ -148,6 +146,59 @@ function prepare_runs()
 
     push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.0001, "k" => "gt"))
     push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.0005, "k" => "gt"))
+
+    return runs
+end
+
+function prepare_runs_single_tmnist_noDef_x2()
+    runs = []
+    tmnist_epss = [0.0001, 0.0004, 0.0016, 0.0064, 0.01]
+    tmnist_epss = [0.0025]
+
+    for k in [2]
+        for eps in tmnist_epss
+#             if k ==2 && eps < 0.002
+#                 continue
+#             end
+            push!(runs, Dict("dataset" => "tmnist", "model" => "tmnist_noDef_x2", "eps" => eps, "k" => k))
+        end
+    end
+
+    return runs
+end
+
+function prepare_runs_single_pascal_voc_noDef_x3()
+    runs = []
+    tmnist_epss = [0.0001, 0.0004, 0.0016, 0.0064, 0.008, 0.01]
+
+    for k in [3, 4]
+        for eps in tmnist_epss
+            if k ==3 && eps < 0.002
+                continue
+            end
+            push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => eps, "k" => k))
+        end
+    end
+
+    return runs
+end
+
+function prepare_baseline_runs()
+    runs = []
+
+    for eps in [0.0001, 0.2]
+        for k in [2, 3]
+            push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k))
+        end
+    end
+
+#     for eps in [0.0001, 0.0005]
+#         for k in [2, 3]
+#             push!(runs, Dict("dataset" => "tmnist", "model" => "tmnist_noDef_x2", "eps" => eps, "k" => k))
+#         end
+#     end
+#     push!(runs, Dict("dataset" => "tmnist", "model" => "tmnist_noDef_x2", "eps" => 0.01, "k" => 2))
+#     push!(runs, Dict("dataset" => "tmnist", "model" => "tmnist_noDef_x2", "eps" => 0.0002, "k" => 3))
 
     return runs
 end
