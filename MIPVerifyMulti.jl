@@ -27,6 +27,15 @@ include("models.jl")
 include("utils.jl")
 include("logging.jl")
 
+function remaining_Mulloc_sec(start_time, time_limit)
+    rem = time_limit*60 - (Float64((now() - start_time).value)/1000)
+    if rem < 0
+        return 0
+    else
+        return rem
+    end
+end
+
 function get_max_index(x::Array{<:Real,1})::Integer
     return findmax(x)[2]
 end
@@ -146,6 +155,7 @@ function find_adversarial_example(
     img_idx::String = "",
     optimal = "max",
     limit_time = Inf,
+    start_time,
     swap_consts_buf,
     d::Dict
 )::Dict
@@ -293,7 +303,12 @@ function find_adversarial_example(
                 
                 # set_optimizer_attributes(m, main_solve_options...)
                 set_optimizer(m, optimizer_with_attributes(optimizer, main_solve_options...))
-                set_time_limit_sec(m, limit_time)
+                if limit_time != Inf
+                    lt = remaining_Mulloc_sec(start_time, limit_time)
+                else
+                    lt = Inf
+                end
+                set_time_limit_sec(m, lt)
                 # set_optimizer(m, optimizer)
                 # set_optimizer_attributes(m, main_solve_options...)
                 
@@ -304,11 +319,22 @@ function find_adversarial_example(
                 
                 optimize!(m)
                 d[:SolveStatus] = JuMP.termination_status(m)
-                d[:SolveTime] = JuMP.solve_time(m)
+                if d[:SolveStatus] != MOI.TIME_LIMIT
+                    d[:SolveTime] = JuMP.solve_time(m)
+                else
+                    d[:SolveTime] = lt
+                end
                 # d[:BestObjective] = JuMP.objective_value(m)
 
-                i = get_first_true_index(opt_nontarget_arr)
-                d[:OptNonTarget] = nontarget_indexes[filtered_indexes][i]
+                feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
+                robust = !feasible
+
+                if robust || (d[:SolveStatus] == MOI.TIME_LIMIT)
+                    d[:OptNonTarget] = nothing      # this is not used if all labels of the super milp are robust
+                else
+                    i = get_first_true_index(opt_nontarget_arr)
+                    d[:OptNonTarget] = nontarget_indexes[filtered_indexes][i]
+                end
 
                 GRBreset(Ref(m), 0)
                 for var in extra_vars
@@ -382,11 +408,20 @@ function relation_feasibility(
     # # set_optimizer_attribute(m, "Presolve", 0)
     
     optimize!(m)
-    
+
     d[:SolveStatus] = JuMP.termination_status(m)
     print("\nStatus: $(d[:SolveStatus])\n")
-    
-    d[:SolveTime] = JuMP.solve_time(m)
+    feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
+
+    if feasible && (d[:SolveStatus] != MOI.TIME_LIMIT)
+        d[:OutputVals] = value.(d[:Output])
+    end
+
+    if d[:SolveStatus] != MOI.TIME_LIMIT
+        d[:SolveTime] = JuMP.solve_time(m)
+    else
+        d[:SolveTime] = limit_time
+    end
 
     GRBreset(Ref(m), 0)
     
