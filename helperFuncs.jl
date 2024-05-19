@@ -102,26 +102,38 @@ function get_labels_lowest_set(scores, thresh)
     return length(scores)
 end
 
-function init_Ds(mini_eps)
+function init_D()
     d = Dict()
     d[:compute_bounds] = true
     d[:sub] = false
 
-    sub_d = Dict()
-    sub_d[:compute_bounds] = true
-    sub_d[:sub] = true
-    sub_d[:mini_eps] = mini_eps
+    return d
+end
 
-    return (d, sub_d)
+function stop_Mulloc(start_time, time_limit)
+    return (Float64((now() - start_time).value)/60000 >= time_limit)
+end
+
+function remaining_Mulloc_min(start_time, time_limit)
+    rem = time_limit - (Float64((now() - start_time).value)/60000)
+    if rem < 0
+        return 0
+    else
+        return rem
+    end
+end
+
+function remaining_Mulloc_sec(start_time, time_limit)
+    rem = time_limit*60 - (Float64((now() - start_time).value)/1000)
+    if rem < 0
+        return 0
+    else
+        return rem
+    end
 end
 
 function prepare_runs()
     runs = []
-    for eps in [0.0001, 0.2]
-        for k in [2, 3]
-            push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k))
-        end
-    end
 
     for eps in [0.0001, 0.0005]
         for k in [2, 3]
@@ -137,23 +149,26 @@ function prepare_runs()
         end
     end
 
-    for eps in [0.0001, 0.0005]
-        for k in [3, 4]
+    for eps in [0.0001, 0.0005, 0.001]
+        for k in [3, 4, "gt"]
             push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => eps, "k" => k))
         end
     end
-    push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.001, "k" => 3))
 
-    push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.0001, "k" => "gt"))
-    push!(runs, Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.0005, "k" => "gt"))
+    for eps in [0.0001, 0.2]
+        for k in [2, 3]
+            push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k))
+        end
+    end
 
     return runs
 end
 
 function prepare_runs_single_tmnist_noDef_x2()
     runs = []
-    tmnist_epss = [0.0001, 0.0004, 0.0016, 0.0064, 0.01]
-    tmnist_epss = [0.0025]
+    tmnist_epss = [0.0001, 0.0004, 0.0008, 0.0016, 0.0025, 0.0045, 0.0064, 0.01]
+#     tmnist_epss = [0.0025, 0.0045, 0.0064, 0.01]
+#     tmnist_epss = [0.0008]
 
     for k in [2]
         for eps in tmnist_epss
@@ -186,11 +201,58 @@ end
 function prepare_baseline_runs()
     runs = []
 
-    for eps in [0.0001, 0.2]
-        for k in [2, 3]
-            push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k))
+#     for k in [2, 3]
+#         for eps in [0.01]
+#             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k,
+#             "skip_sampling" => false, "skip_attacking" => false, "skip_swap_milps" => false, "skip_super_milps" => false))
+#
+#             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k,
+#             "skip_sampling" => true, "skip_attacking" => true, "skip_swap_milps" => true, "skip_super_milps" => false))
+#
+#             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k,
+#             "skip_sampling" => true, "skip_attacking" => true, "skip_swap_milps" => true, "skip_super_milps" => true))
+#         end
+#     end
+
+    for k in [2, 3]
+        for eps in [0.2]
+            push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k,
+            "skip_sampling" => false, "skip_attacking" => false, "skip_swap_milps" => false, "skip_super_milps" => false))
+
+#             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k,
+#             "skip_sampling" => true, "skip_attacking" => true, "skip_swap_milps" => true, "skip_super_milps" => false))
+#
+#             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k,
+#             "skip_sampling" => true, "skip_attacking" => true, "skip_swap_milps" => true, "skip_super_milps" => true))
         end
     end
+
+#     for k in [2, 3]
+#         for eps in [0.001, 0.01]
+#             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k,
+#             "skip_sampling" => true, "skip_attacking" => true, "skip_swap_milps" => true, "skip_super_milps" => false))
+#
+#             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k,
+#             "skip_sampling" => false, "skip_attacking" => false, "skip_swap_milps" => false, "skip_super_milps" => false))
+#
+#             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => k,
+#             "skip_sampling" => true, "skip_attacking" => true, "skip_swap_milps" => true, "skip_super_milps" => true))
+#         end
+#     end
+#
+#     for k in [2, 3]
+#         push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => 0.1, "k" => k,
+#         "skip_sampling" => true, "skip_attacking" => true, "skip_swap_milps" => true, "skip_super_milps" => false))
+#         push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => 0.1, "k" => k,
+#         "skip_sampling" => false, "skip_attacking" => false, "skip_swap_milps" => false, "skip_super_milps" => false))
+#         push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => 0.1, "k" => k,
+#         "skip_sampling" => true, "skip_attacking" => true, "skip_swap_milps" => true, "skip_super_milps" => true))
+#     end
+
+
+#     for eps in [0.0001, 0.001, 0.01, 0.1, 0.2]
+#             push!(runs, Dict("dataset" => "dmnist", "model" => "dmnist_noDef_x2", "eps" => eps, "k" => 4))
+#         end
 
 #     for eps in [0.0001, 0.0005]
 #         for k in [2, 3]
