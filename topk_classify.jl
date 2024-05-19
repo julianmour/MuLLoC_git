@@ -13,41 +13,33 @@ using DataFrames
 using StatsBase
 using Base.Filesystem
 
-
 include("MIPVerifyMulti.jl")
 include("helperFuncs.jl")
 
 using .MIPVerifyMulti
 
+
 torch = pyimport("torch")
 pickle = pyimport("pickle")
 np = pyimport("numpy")
-
-# dataset = "tmnist"
-# # model_names = ["dmnist_noDef", "dmnist_L0Def", "dmnist_LInfDef"]
-# model_names = ["tmnist_noDef_x2"]
-# ks = [2, 3]
-# # ks = [2]
-#
-# # epsilons = [0.003]
-# epsilons = [0.01]
 
 runs = prepare_runs()
 
 runs = prepare_baseline_runs()
 
-skip_sampling = true
+# skip_sampling = true
 const DEFAULT_RANDOM_SAMPLING_DURATION = 0.25
 const DEFAULT_CORNERS_SAMPLING_DURATION = 0.25
+const DEFAULT_MULLOC_TIME_LIMIT = 30  # 30 minutes
 
-skip_attacking = true
-skip_mini_milps = true
-const DEFAULT_MINI_MILP_TIME_LIMIT = 10
+# skip_attacking = true
+# skip_swap_milps = true
+const DEFAULT_SWAP_MILP_TIME_LIMIT = 10 # 10 seconds
+# const DEFAULT_MILP_TIME_LIMIT = Inf
 
-skip_super_milps = true
+# skip_super_milps = false
 const DEFAULT_HEURISTICS_PARAMETER = 0.05
 
-skip_sub_milps = true
 mini_eps = 0.001
 
 continue_check = true
@@ -68,6 +60,10 @@ single_sample_mode = false
 for args in runs
     model_name = args["model"]
     dataset = args["dataset"]
+    skip_sampling = args["skip_sampling"]
+    skip_attacking = args["skip_attacking"]
+    skip_swap_milps = args["skip_swap_milps"]
+    skip_super_milps = args["skip_super_milps"]
 
     ############## Model loading ###############
 
@@ -244,8 +240,7 @@ for args in runs
 
     skip_sampling_txt = skip_sampling ? "_skipSampling" : ""
     skip_attacking_txt = skip_attacking ? "_skipAttacking" : ""
-    skip_milp_relations_txt = skip_mini_milps ? "_skipMiniMilps" : ""
-    # skip_sub_milps_txt = skip_sub_milps ? "_skipSubMilps" : ""
+    skip_milp_relations_txt = skip_swap_milps ? "_skipMiniMilps" : ""
     skip_super_milps_txt = skip_super_milps ? "_skipSuperMilps" : ""
 
     if !single_sample_mode
@@ -262,10 +257,17 @@ for args in runs
     corners_sampling_duration = DEFAULT_CORNERS_SAMPLING_DURATION
 
     start_from_img_idx = 1
-    till_img_idx = 30
+    till_img_idx = 5
+#     if k_ == 2 && eps == 0.001 && (!skip_super_milps) && skip_swap_milps
+#         continue
+#     end
+#
+#     if k_ == 2 && eps == 0.01 && !skip_swap_milps
+#         start_from_img_idx = 3
+#     end
 
-#     if k_ == 4 && eps == 0.001
-#         start_from_img_idx = 1
+#     if k_ == 2 && eps == 0.01 && continue_check
+#         start_from_img_idx = 16
 #         global continue_check = false
 #     elseif continue_check
 #         continue
@@ -274,15 +276,12 @@ for args in runs
     # skip = [1,3,5,7,9,11,13,15,17,19]
     skip = []
 
-    mini_milp_time_limit = DEFAULT_MINI_MILP_TIME_LIMIT
+    swap_milp_time_limit = DEFAULT_SWAP_MILP_TIME_LIMIT
+#     milp_time_limit = DEFAULT_MILP_TIME_LIMIT
 
     counter_pasc = 0
 
     for (i_idx, i) in enumerate(img_names)
-
-        mini_milps_num = 0
-        super_milps_num = 0
-        regular_milps_num = 0
 
         if single_sample_mode && (!(i == single_sample))
             continue
@@ -295,16 +294,6 @@ for args in runs
         if i_idx in skip
             continue
         end
-
-#         if (!(i in pascal_voc_x3_0001))
-#             continue
-#         end
-
-#         counter_pasc = counter_pasc + 1
-
-#         if (counter_pasc < 12)
-#             continue
-#         end
 
         output_path = joinpath("$results_folder", "$i")
         if !isdir(output_path)
@@ -364,7 +353,7 @@ for args in runs
         not_topk = ranking[k+1:end]
         overall_updated = 0
 
-        (d, sub_d) = init_Ds(mini_eps)
+        d = init_D()
 
         print("**************** PRUNING RELATIONS USING ORIGINAL IMAGE ****************\n\n")
 
@@ -376,7 +365,7 @@ for args in runs
             print("# overall updated entries = ", overall_updated, "\n\n")
         end
 
-
+        print("\nREMAINING TIME: $(remaining_Mulloc_min(start_time, DEFAULT_MULLOC_TIME_LIMIT)) mins\n")
         print("**************** PRUNING RELATIONS USING SAMPLED IMAGES ****************\n\n")
 
         random_sampling_classified = 0
@@ -495,6 +484,7 @@ for args in runs
 
             random_sampling_time = now() -start_time
 
+            print("\nREMAINING TIME: $(remaining_Mulloc_min(start_time, DEFAULT_MULLOC_TIME_LIMIT)) mins\n")
             print("**************** PRUNING RELATIONS USING EXTREME SAMPLED IMAGES ****************\n\n")
 
             corner_sampling_start_time = now()
@@ -590,12 +580,17 @@ for args in runs
             print("skipping sampling...\n\n")
         end
 
+        mini_milps_num = 0
+        super_milps_num = 0
+        regular_milps_num = 0
 
+        print("\nREMAINING TIME: $(remaining_Mulloc_min(start_time, DEFAULT_MULLOC_TIME_LIMIT)) mins\n")
         print("**************** PRUNING RELATIONS USING SWAP ANALYSIS ****************\n\n")
 
         swaps_start_time = now()
         attacks_classified = 0
         swap_milps_classified = 0
+        swap_milps_opt_time_only = 0
         constraints_buffer = []
 
         always_better_count = zeros(m)
@@ -642,7 +637,7 @@ for args in runs
                 end
             end
 
-            while true
+            while true && !stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
                 if !isfile(joinpath("TKML-AP-master", "pyCommand_attacks_ready.txt"))
                     file = open(joinpath("TKML-AP-master", "tmp_pyCommand_attacks_ready.txt"), "w")
                     close(file)
@@ -651,9 +646,13 @@ for args in runs
                 end
             end
 
-            while isempty(swap_files) == false
+            while !isempty(swap_files) && !stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
 
                 for swap_key in keys(swap_files)
+
+                    if stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
+                        break
+                    end
 
                     attack_failed_path = swap_files[swap_key][1]
                     perturbed_np_path = swap_files[swap_key][2]
@@ -665,7 +664,7 @@ for args in runs
                         rm(attack_failed_path)
                         successful_swaps[top_class, bottom_class] = -1
 
-                        if (!skip_mini_milps) && (ltm[bottom_class, top_class]==-1)
+                        if (!skip_swap_milps) && (ltm[bottom_class, top_class]==-1)
 
                             mini_milps_num += 1
 
@@ -674,14 +673,17 @@ for args in runs
                                 img_,
                                 Gurobi.Optimizer,
                                 Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                    "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                                    "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                                    "MIPFocus" => 1),
                                 epsilons=[eps],
                                 l1=top_class,
                                 l2=bottom_class,
                                 img_idx = i,
-                                limit_time = mini_milp_time_limit,
+                                limit_time = swap_milp_time_limit,
                                 d = d;
                             )
+
+                            swap_milps_opt_time_only += d[:SolveTime]
 
                             feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
                             print(feasible ? "Couldn't prove infeasibility...\n\n" : "INFEASIBLE ==> label $top_class > label $bottom_class always\n\n")
@@ -698,8 +700,9 @@ for args in runs
                                 gtm[top_class, bottom_class] = 1
                                 gtm[bottom_class, top_class] = 0
                                 ltm[top_class, bottom_class] = 0
-                            else
-                                perturbed_output = value.(d[:Output])
+                            elseif (d[:SolveStatus] != MOI.TIME_LIMIT)
+                                perturbed_output = d[:OutputVals]
+                                print("\nSwap-milp's feasible solution scores: $perturbed_output\n")
                                 perturbed_ranking = reverse(sortperm(perturbed_output))
 
                                 # update matrixes according to image scores
@@ -714,8 +717,8 @@ for args in runs
                                             print("new TOPK class classified: ", top_class,"\n\n")
                                             time = now() - start_time
                                             classes_classification_time[top_class] = Float64(time.value)
-                                            classes_classification_part[top_class] = "attacks"
-                                            attacks_classified += 1
+                                            classes_classification_part[top_class] = "swap-milps"
+                                            swap_milps_classified += 1
                                         end
                                     end
                                 end
@@ -727,8 +730,8 @@ for args in runs
                                             print("new BOTTOM class classified: ", not_top_class,"\n\n")
                                             time = now() - start_time
                                             classes_classification_time[not_top_class] = Float64(time.value)
-                                            classes_classification_part[not_top_class] = "attacks"
-                                            attacks_classified += 1
+                                            classes_classification_part[not_top_class] = "swap-milps"
+                                            swap_milps_classified += 1
                                         end
                                     end
                                 end
@@ -739,6 +742,7 @@ for args in runs
 
                         delete!(swap_files, swap_key)
                         print("Remaining swaps: $(length(swap_files))\n")
+                        print("MODEL $model_name | IMAGE_IDX $i_idx | EPS = $eps | K = $k\n")
 
                     end
 
@@ -804,7 +808,7 @@ for args in runs
 
                         delete!(swap_files, swap_key)
                         print("Remaining swaps: $(length(swap_files))\n")
-
+                        print("MODEL $model_name | IMAGE_IDX $i_idx | EPS = $eps | K = $k\n")
                     end
 
                 end
@@ -867,7 +871,7 @@ for args in runs
                 end
             end
 
-            while true
+            while true && !stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
                 if !isfile(joinpath("TKML-AP-master", "pyCommand_attacks_ready.txt"))
                     file = open(joinpath("TKML-AP-master", "tmp_pyCommand_attacks_ready.txt"), "w")
                     close(file)
@@ -876,9 +880,13 @@ for args in runs
                 end
             end
 
-            while isempty(swap_files) == false
+            while isempty(swap_files) == false && !stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
 
                 for swap_key in keys(swap_files)
+
+                    if stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
+                        break
+                    end
 
                     attack_failed_path = swap_files[swap_key][1]
                     perturbed_np_path = swap_files[swap_key][2]
@@ -889,7 +897,7 @@ for args in runs
                         rm(attack_failed_path)
                         successful_swaps[top_class, bottom_class] = -1
 
-                        if (!skip_mini_milps) && (ltm[bottom_class, top_class] == -1)
+                        if (!skip_swap_milps) && (ltm[bottom_class, top_class] == -1)
 
                             mini_milps_num += 1
 
@@ -898,14 +906,17 @@ for args in runs
                                 img_,
                                 Gurobi.Optimizer,
                                 Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                    "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                                    "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                                    "MIPFocus" => 1),
                                 epsilons=[eps],
                                 l1=top_class,
                                 l2=bottom_class,
                                 img_idx = i,
-                                limit_time = mini_milp_time_limit,
+                                limit_time = swap_milp_time_limit,
                                 d = d;
                             )
+
+                            swap_milps_opt_time_only += d[:SolveTime]
 
                             feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
                             print(feasible ? "Couldn't prove infeasibility...\n\n" : "INFEASIBLE ==> label $top_class > label $bottom_class always\n\n")
@@ -922,8 +933,9 @@ for args in runs
                                 gtm[top_class, bottom_class] = 1
                                 gtm[bottom_class, top_class] = 0
                                 ltm[top_class, bottom_class] = 0
-                            else
-                                perturbed_output = value.(d[:Output])
+                            elseif (d[:SolveStatus] != MOI.TIME_LIMIT)
+                                perturbed_output = d[:OutputVals]
+                                print("\nSwap-milp's feasible solution scores: $perturbed_output\n")
                                 perturbed_ranking = reverse(sortperm(perturbed_output))
 
                                 # update matrixes according to image scores
@@ -938,8 +950,8 @@ for args in runs
                                             print("new TOPK class classified: ", top_class,"\n\n")
                                             time = now() - start_time
                                             classes_classification_time[top_class] = Float64(time.value)
-                                            classes_classification_part[top_class] = "attacks"
-                                            attacks_classified += 1
+                                            classes_classification_part[top_class] = "swap-milps"
+                                            swap_milps_classified += 1
                                         end
                                     end
                                 end
@@ -951,8 +963,8 @@ for args in runs
                                             print("new BOTTOM class classified: ", not_top_class,"\n\n")
                                             time = now() - start_time
                                             classes_classification_time[not_top_class] = Float64(time.value)
-                                            classes_classification_part[not_top_class] = "attacks"
-                                            attacks_classified += 1
+                                            classes_classification_part[not_top_class] = "swap-milps"
+                                            swap_milps_classified += 1
                                         end
                                     end
                                 end
@@ -1060,6 +1072,7 @@ for args in runs
         print("**************** CLASSIFYING LABELS USING A MILP VERIFIER ****************\n\n")
 
         verifier_start_time = now()
+        milps_opt_time_only = 0
         verifier_classified = 0
 
         constraints_buffer_sub = copy(constraints_buffer)
@@ -1071,134 +1084,94 @@ for args in runs
                 time = now() - start_time
                 classes_classification_time[top_class] = Float64(time.value)
                 classes_classification_part[top_class] = "full L-out"
-                # verifier_classified += 1
-                continue
-            end
-            if classes_classification[top_class] == -1
-                if !skip_sub_milps
-                    print("Checking robustness for top label:\n")
-                    print("SUB-MILP: Does the label \"", string(top_class), "\" stays IN the top-$k labels in the sub-neighborhood [x+$(eps-mini_eps), x+$eps]?\n\n")
-
-                    sub_d = MIPVerifyMulti.find_adversarial_example(
-                        model,
-                        img_,
-                        top_class,
-                        invert_target_selection = true,
-                        Gurobi.Optimizer,
-                        Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign)
-                        epsilons=[eps],
-                        norm_order = Inf,
-                        multilabel = k,
-                        img_idx = i,
-                        optimal = "max",
-                        swap_consts_buf = constraints_buffer_sub,
-                        d = sub_d;
-                    )
-
-                    sub_milps_num += 1
-
-                    constraints_buffer_sub = []
-
-                    print("\n\nRL = "*string(RL)*"\n")
-                    robust = (RL>0)
-                else
-                    robust = true
-                end
-
-                if robust
-                    if !skip_sub_milps
-                        print("ROBUST\n")
-                        print("FAILED to refute robustness of $top_class using SUB-MILP.\n\n")
-                    else
-                        print("skipping sub-milps...\n\n")
-                    end
-
-                    top_C = filter(x -> classes_classification[x] == -1, topk)
-
-                    while length(top_C) > 0
-
-                        if skip_super_milps
-                            print("skipping super-milps...\n\n")
-                            break
-                        end
-
-                        print("Checking robustness for top labels:\n")
-                        print("SUPER-MILP: Do the labels $top_C stays IN the top-$k labels in the eps=", eps,"-ball?\n\n")
-
-                        # set_optimizer_attribute(m, "BestObjStop", 0)  # for early stopping (a non robust solution (adv example) is found)
-                        # set_optimizer_attribute(m, "MIPGap", 0.99)  # for early stopping (lower and upper bounds of optimal solution have the same sign)
-                        # set_optimizer_attribute(m, "Presolve", 0)
-
-                        d = MIPVerifyMulti.find_adversarial_example(
-                            model,
-                            img_,
-                            top_C,
-                            invert_target_selection = true,
-                            Gurobi.Optimizer,
-                            Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
-                                "MIPFocus" => 1,
-                                "Heuristics" => DEFAULT_HEURISTICS_PARAMETER,
-                                "ImproveStartTime" => 0.0,
-                                "Threads" => 128),
-                            epsilons=[eps],
-                            norm_order = Inf,
-                            multilabel = k,
-                            img_idx = i,
-                            optimal = "max",
-                            swap_consts_buf = constraints_buffer,
-                            d = d;
-                        )
-
-                        super_milps_num += 1
-
-                        feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
-                        robust = !feasible
-
-                        constraints_buffer = []
-                        # RL = -d[:BestObjective]
-                        # print("\n\nRL = "*string(RL)*"\n")
-                        # robust = (RL>0)
-
-                        if robust
-                            print("ROBUST\n\n")
-                            for top_class_C in top_C
-                                classes_classification[top_class_C] = 0   # always in topk
-                                print("new TOP class classified: ", top_class_C,"\n\n")
-                                time = now() - start_time
-                                classes_classification_time[top_class_C] = Float64(time.value)
-                                classes_classification_part[top_class_C] = "MILP verifier"
-                                verifier_classified += 1
-                            end
-                            break
-                        else
-                            print("NOT ROBUST\n\n")
-                            classes_classification[d[:OptNonTarget]] = 2   # can be in both
-                            print("new TOP class classified: ", d[:OptNonTarget],"\n\n")
-                            time = now() - start_time
-                            classes_classification_time[d[:OptNonTarget]] = Float64(time.value)
-                            classes_classification_part[d[:OptNonTarget]] = "MILP verifier"
-                            verifier_classified += 1
-                            top_C = filter(x -> x != d[:OptNonTarget], top_C)
-                        end
-
-                    end
-
-                else
-                    print("NOT ROBUST\n\n")
-                    classes_classification[top_class] = 2   # can be in both
-                    print("new TOP class classified: ", top_class,"\n\n")
-                    time = now() - start_time
-                    classes_classification_time[top_class] = Float64(time.value)
-                    classes_classification_part[top_class] = "MILP verifier"
-                    verifier_classified += 1
-                end
             end
         end
 
+        top_C = filter(x -> classes_classification[x] == -1, topk)
+
+        while length(top_C) > 0 && !stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
+
+            print("\nREMAINING TIME: $(remaining_Mulloc_min(start_time, DEFAULT_MULLOC_TIME_LIMIT)) mins\n")
+            sleep(2)
+
+            if skip_super_milps
+                print("skipping super-milps...\n\n")
+                break
+            end
+
+            print("Checking robustness for top labels:\n")
+            print("SUPER-MILP: Do the labels $top_C stays IN the top-$k labels in the eps=", eps,"-ball?\n\n")
+
+            # set_optimizer_attribute(m, "BestObjStop", 0)  # for early stopping (a non robust solution (adv example) is found)
+            # set_optimizer_attribute(m, "MIPGap", 0.99)  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+            # set_optimizer_attribute(m, "Presolve", 0)
+
+            d = MIPVerifyMulti.find_adversarial_example(
+                model,
+                img_,
+                top_C,
+                invert_target_selection = true,
+                Gurobi.Optimizer,
+                Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
+                    "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                    "MIPFocus" => 1,
+                    "Heuristics" => DEFAULT_HEURISTICS_PARAMETER,
+                    "ImproveStartTime" => 0.0,
+                    "Threads" => 128),
+                epsilons=[eps],
+                norm_order = Inf,
+                multilabel = k,
+                img_idx = i,
+                optimal = "max",
+                limit_time = DEFAULT_MULLOC_TIME_LIMIT,
+                start_time = start_time,
+                swap_consts_buf = constraints_buffer,
+                d = d;
+            )
+
+            super_milps_num += 1
+            milps_opt_time_only += d[:SolveTime]
+
+            feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
+            robust = !feasible
+
+            constraints_buffer = []
+
+            if (d[:SolveStatus] == MOI.TIME_LIMIT)
+                print("\nTIME LIMIT EXCEEDED!\n")
+                break
+            end
+
+            if robust
+                print("ROBUST\n\n")
+                for top_class_C in top_C
+                    classes_classification[top_class_C] = 0   # always in topk
+                    print("new TOP class classified: ", top_class_C,"\n\n")
+                    time = now() - start_time
+                    classes_classification_time[top_class_C] = Float64(time.value)
+                    classes_classification_part[top_class_C] = "MILP verifier"
+                    verifier_classified += 1
+                end
+                break
+            else
+                print("NOT ROBUST\n\n")
+                classes_classification[d[:OptNonTarget]] = 2   # can be in both
+                print("new TOP class classified: ", d[:OptNonTarget],"\n\n")
+                time = now() - start_time
+                classes_classification_time[d[:OptNonTarget]] = Float64(time.value)
+                classes_classification_part[d[:OptNonTarget]] = "MILP verifier"
+                verifier_classified += 1
+                top_C = filter(x -> x != d[:OptNonTarget], top_C)
+            end
+        end
+
+
         for top_class in topk
-            if classes_classification[top_class] == -1
+            if classes_classification[top_class] == -1 && !stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
+
+                print("\nREMAINING TIME: $(remaining_Mulloc_min(start_time, DEFAULT_MULLOC_TIME_LIMIT)) mins\n")
+                sleep(2)
+
                 print("Checking robustness for topk label:\n")
                 print("Does the label \"", string(top_class), "\" stays IN the top-$k labels in the eps=", eps,"-ball?\n\n")
 
@@ -1219,18 +1192,24 @@ for args in runs
                         multilabel = k,
                         img_idx = i,
                         optimal = "max",
+                        limit_time = DEFAULT_MULLOC_TIME_LIMIT,
+                        start_time = start_time,
                         swap_consts_buf = constraints_buffer,
                         d = d;
                     )
 
                 regular_milps_num += 1
+                milps_opt_time_only += d[:SolveTime]
 
                 constraints_buffer = []
                 feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
                 robust = !feasible
-#                 RL = -d[:BestObjective]
-#                 print("\n\nRL = "*string(RL)*"\n")
-#                 robust = (RL>0)
+
+                if (d[:SolveStatus] == MOI.TIME_LIMIT)
+                    print("\nTIME LIMIT EXCEEDED!\n")
+                    break
+                end
+
                 if robust
                     print("ROBUST\n\n")
                     classes_classification[top_class] = 0   # always in topk
@@ -1242,6 +1221,9 @@ for args in runs
                 time = now() - start_time
                 classes_classification_time[top_class] = Float64(time.value)
                 classes_classification_part[top_class] = "MILP verifier"
+#                 if (d[:SolveStatus] == MOI.TIME_LIMIT)
+#                     classes_classification_part[top_class] = "Time limit"
+#                 end
                 verifier_classified += 1
             end
         end
@@ -1254,132 +1236,91 @@ for args in runs
                 time = now() - start_time
                 classes_classification_time[bottom_class] = Float64(time.value)
                 classes_classification_part[bottom_class] = "full L-in"
-                # verifier_classified += 1
-                continue
-            end
-            if classes_classification[bottom_class] == -1
-                if !skip_sub_milps
-                    print("Checking robustness for bottom label:\n")
-                    print("SUB-MILP: Does the label \"", string(bottom_class), "\" stays OUT of the top-$k labels in the sub-neighborhood [x+$(eps-mini_eps), x+$eps]?\n\n")
-
-                    sub_d = MIPVerifyMulti.find_adversarial_example(
-                        model,
-                        img_,
-                        bottom_class,
-                        invert_target_selection = true,
-                        Gurobi.Optimizer,
-                        Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                "MIPGap" => 0.9999),  # for early stopping (lower and upper bounds of optimal solution have the same sign)
-                        epsilons=[eps],
-                        norm_order = Inf,
-                        multilabel = k,
-                        img_idx = i,
-                        optimal = "min",
-                        swap_consts_buf = constraints_buffer_sub,
-                        d = sub_d;
-                    )
-
-                    sub_milps_num += 1
-
-                    constraints_buffer_sub = []
-                    RL = sub_d[:BestObjective]
-                    print("\n\nRL = "*string(RL)*"\n")
-                    robust = (RL>0)
-                else
-                    robust = true
-                end
-
-                if robust
-                    if !skip_sub_milps
-                        print("ROBUST\n")
-                        print("FAILED to refute robustness of $bottom_class using SUB-MILP.\n\n")
-                    else
-                        print("skipping sub-milps...\n\n")
-                    end
-
-                    bottom_C = filter(x -> classes_classification[x] == -1, not_topk)
-
-                    while length(bottom_C) > 0
-
-                        if skip_super_milps
-                            print("skipping super-milps...\n\n")
-                            break
-                        end
-
-                        print("Checking robustness for bottom labels:\n")
-                        print("SUPER-MILP: Do the labels $bottom_C stays OUT of the top-$k labels in the eps=", eps,"-ball?\n\n")
-
-                        d = MIPVerifyMulti.find_adversarial_example(
-                            model,
-                            img_,
-                            bottom_C,
-                            invert_target_selection = true,
-                            Gurobi.Optimizer,
-                            Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
-                                "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
-                                "MIPFocus" => 1,
-                                "Heuristics" => DEFAULT_HEURISTICS_PARAMETER,
-                                "ImproveStartTime" => 0.0,
-                                "Threads" => 128),
-#                                 "Cutoff" => 0),
-                            epsilons=[eps],
-                            norm_order = Inf,
-                            multilabel = k,
-                            img_idx = i,
-                            optimal = "min",
-                            swap_consts_buf = constraints_buffer,
-                            d = d;
-                        )
-
-                        super_milps_num += 1
-
-                        feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
-                        robust = !feasible
-
-                        constraints_buffer = []
-                        # RL = -d[:BestObjective]
-                        # print("\n\nRL = "*string(RL)*"\n")
-                        # robust = (RL>0)
-
-                        if robust
-                            print("ROBUST\n\n")
-                            for bottom_class_C in bottom_C
-                                classes_classification[bottom_class_C] = 1   # always not in topk
-                                print("new BOTTOM class classified: ", bottom_class_C,"\n\n")
-                                time = now() - start_time
-                                classes_classification_time[bottom_class_C] = Float64(time.value)
-                                classes_classification_part[bottom_class_C] = "MILP verifier"
-                                verifier_classified += 1
-                            end
-                            break
-                        else
-                            print("NOT ROBUST\n\n")
-                            classes_classification[d[:OptNonTarget]] = 2   # can be in both
-                            print("new BOTTOM class classified: ", d[:OptNonTarget],"\n\n")
-                            time = now() - start_time
-                            classes_classification_time[d[:OptNonTarget]] = Float64(time.value)
-                            classes_classification_part[d[:OptNonTarget]] = "MILP verifier"
-                            verifier_classified += 1
-
-                            bottom_C = filter(x -> x != d[:OptNonTarget], bottom_C)
-                        end
-
-                    end
-
-                else
-                    print("NOT ROBUST\n\n")
-                    classes_classification[bottom_class] = 2   # can be in both
-                    print("new BOTTOM class classified: ", bottom_class,"\n\n")
-                    time = now() - start_time
-                    classes_classification_time[bottom_class] = Float64(time.value)
-                    classes_classification_part[bottom_class] = "MILP verifier"
-                    verifier_classified += 1
-                end
             end
         end
 
+        bottom_C = filter(x -> classes_classification[x] == -1, not_topk)
+
+        while length(bottom_C) > 0 && !stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
+
+            print("\nREMAINING TIME: $(remaining_Mulloc_min(start_time, DEFAULT_MULLOC_TIME_LIMIT)) mins\n")
+            sleep(2)
+
+            if skip_super_milps
+                print("skipping super-milps...\n\n")
+                break
+            end
+
+            print("Checking robustness for bottom labels:\n")
+            print("SUPER-MILP: Do the labels $bottom_C stays OUT of the top-$k labels in the eps=", eps,"-ball?\n\n")
+
+            d = MIPVerifyMulti.find_adversarial_example(
+                model,
+                img_,
+                bottom_C,
+                invert_target_selection = true,
+                Gurobi.Optimizer,
+                Dict("BestObjStop" => 0, # for early stopping (a non robust solution (adv example) is found)
+                    "MIPGap" => 0.9999,  # for early stopping (lower and upper bounds of optimal solution have the same sign)
+                    "MIPFocus" => 1,
+                    "Heuristics" => DEFAULT_HEURISTICS_PARAMETER,
+                    "ImproveStartTime" => 0.0,
+                    "Threads" => 128),
+                epsilons=[eps],
+                norm_order = Inf,
+                multilabel = k,
+                img_idx = i,
+                optimal = "min",
+                limit_time = DEFAULT_MULLOC_TIME_LIMIT,
+                start_time = start_time,
+                swap_consts_buf = constraints_buffer,
+                d = d;
+            )
+
+            super_milps_num += 1
+            milps_opt_time_only += d[:SolveTime]
+
+            feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
+            robust = !feasible
+
+            constraints_buffer = []
+
+            if (d[:SolveStatus] == MOI.TIME_LIMIT)
+                print("\nTIME LIMIT EXCEEDED!\n")
+                break
+            end
+
+            if robust
+                print("ROBUST\n\n")
+                for bottom_class_C in bottom_C
+                    classes_classification[bottom_class_C] = 1   # always not in topk
+                    print("new BOTTOM class classified: ", bottom_class_C,"\n\n")
+                    time = now() - start_time
+                    classes_classification_time[bottom_class_C] = Float64(time.value)
+                    classes_classification_part[bottom_class_C] = "MILP verifier"
+                    verifier_classified += 1
+                end
+                break
+            else
+                print("NOT ROBUST\n\n")
+                classes_classification[d[:OptNonTarget]] = 2   # can be in both
+                print("new BOTTOM class classified: ", d[:OptNonTarget],"\n\n")
+                time = now() - start_time
+                classes_classification_time[d[:OptNonTarget]] = Float64(time.value)
+                classes_classification_part[d[:OptNonTarget]] = "MILP verifier"
+                verifier_classified += 1
+
+                bottom_C = filter(x -> x != d[:OptNonTarget], bottom_C)
+            end
+
+        end
+
         for bottom_class in not_topk
-            if classes_classification[bottom_class] == -1
+            if classes_classification[bottom_class] == -1 && !stop_Mulloc(start_time, DEFAULT_MULLOC_TIME_LIMIT)
+
+                print("\nREMAINING TIME: $(remaining_Mulloc_min(start_time, DEFAULT_MULLOC_TIME_LIMIT)) mins\n")
+                sleep(2)
+
                 print("Checking robustness for bottom label:\n")
                 print("Regular MILP: Does the label \"", string(bottom_class), "\" stays OUT of the top-$k labels in the eps=", eps,"-ball?\n\n")
 
@@ -1400,18 +1341,24 @@ for args in runs
                     multilabel = k,
                     img_idx = i,
                     optimal = "min",
+                    limit_time = DEFAULT_MULLOC_TIME_LIMIT,
+                    start_time = start_time,
                     swap_consts_buf = constraints_buffer,
                     d = d;
                 )
 
                 regular_milps_num += 1
+                milps_opt_time_only += d[:SolveTime]
 
                 constraints_buffer = []
                 feasible = !(d[:SolveStatus] == MOI.INFEASIBLE || d[:SolveStatus] == MOI.INFEASIBLE_OR_UNBOUNDED || d[:SolveStatus] == MOI.DUAL_INFEASIBLE)
                 robust = !feasible
-#                 RL = d[:BestObjective]
-#                 print("\n\nRL = "*string(RL)*"\n")
-#                 robust = (RL>0)
+
+                if (d[:SolveStatus] == MOI.TIME_LIMIT)
+                    print("\nTIME LIMIT EXCEEDED!\n")
+                    break
+                end
+
                 if robust
                     print("ROBUST\n\n")
                     classes_classification[bottom_class] = 1   # always not in topk
@@ -1423,13 +1370,26 @@ for args in runs
                 time = now() - start_time
                 classes_classification_time[bottom_class] = Float64(time.value)
                 classes_classification_part[bottom_class] = "MILP verifier"
+#                 if (d[:SolveStatus] == MOI.TIME_LIMIT)
+#                     classes_classification_part[bottom_class] = "Time limit"
+#                 end
                 verifier_classified += 1
             end
         end
 
-        print("Final classes classification = ", classes_classification, "\n\n")
         verifier_time = now() - verifier_start_time
 
+        # classify remaining classes due to time limit
+        for class in 1:m
+            if classes_classification[class] == -1
+                classes_classification[class] = 2
+                classes_classification_part[class] = "Time limit"
+                time = now() - start_time
+                classes_classification_time[class] = Float64(time.value)
+            end
+        end
+
+        print("Final classes classification = ", classes_classification, "\n\n")
 
         df1 = DataFrame(Label = ranking,
         Scores = result_[ranking],
@@ -1438,17 +1398,17 @@ for args in runs
         Part_of_classification = classes_classification_part[ranking])
         CSV.write(joinpath("$output_path", "classification_summary.csv"), df1, writeheader=true)
 
-        df2 = DataFrame(Part = ["Random Sampling", "Corner Sampling", "Attacks", "Swap-Milps", "Total swap analysis", "MILP Verifier", "Total"],
-        Execution_time_minutes = [Float64(random_sampling_time.value)/60000, Float64(corner_sampling_time.value)/60000, "-", "-", Float64(swaps_time.value)/60000, Float64(verifier_time.value)/60000, (Float64(random_sampling_time.value)+Float64(corner_sampling_time.value)+Float64(swaps_time.value)+Float64(verifier_time.value))/60000],
-        Num_of_labels_classified = [random_sampling_classified, corner_sampling_classified, attacks_classified, swap_milps_classified, (attacks_classified + swap_milps_classified), verifier_classified, random_sampling_classified + corner_sampling_classified + attacks_classified + swap_milps_classified + verifier_classified])
+        df2 = DataFrame(Part = ["Random Sampling", "Corner Sampling", "Attacks", "Swap-Milps", "Swap-Milps optimization only", "Total swap analysis", "MILP Verifier", "MILP Verifier optimization only", "Total"],
+        Execution_time_minutes = [Float64(random_sampling_time.value)/60000, Float64(corner_sampling_time.value)/60000, "-", "-", Float64(swap_milps_opt_time_only)/60, Float64(swaps_time.value)/60000, Float64(verifier_time.value)/60000, Float64(milps_opt_time_only)/60, (Float64(random_sampling_time.value)+Float64(corner_sampling_time.value)+Float64(swaps_time.value)+Float64(verifier_time.value))/60000],
+        Num_of_labels_classified = [random_sampling_classified, corner_sampling_classified, attacks_classified, swap_milps_classified, "-", (attacks_classified + swap_milps_classified), verifier_classified, "-", random_sampling_classified + corner_sampling_classified + attacks_classified + swap_milps_classified + verifier_classified])
         CSV.write(joinpath("$output_path", "exec_summary.csv"), df2, writeheader=true)
 
         df3 = DataFrame(MILP_TYPE = ["SWAP-MILP", "REGULAR-MILP", "SUPER-MILP"],
         TIMES = [mini_milps_num, regular_milps_num, super_milps_num])
         CSV.write(joinpath("$output_path", "milp_summary.csv"), df3, writeheader=true)
 
-        df4 = DataFrame(PARAM = ["dataset", "model", "input", "num_of_classes", "K", "epsilon", "skip_sampling", "skip_attacking", "skip_mini_milps", "skip_super_milps", "random_sampling_duration[mins]", "corners_sampling_duration[mins]", "mini_milp_time_limit[secs]"],
-        VALUE = [dataset, model_name, i, m, k, eps, skip_sampling, skip_attacking, skip_mini_milps, skip_super_milps, random_sampling_duration, corners_sampling_duration, mini_milp_time_limit])
+        df4 = DataFrame(PARAM = ["dataset", "model", "input", "num_of_classes", "K", "epsilon", "skip_sampling", "skip_attacking", "skip_swap_milps", "skip_super_milps", "random_sampling_duration[mins]", "corners_sampling_duration[mins]", "swap_milp_time_limit[secs]", "mulloc_time_limit[mins]"],
+        VALUE = [dataset, model_name, i, m, k, eps, skip_sampling, skip_attacking, skip_swap_milps, skip_super_milps, random_sampling_duration, corners_sampling_duration, swap_milp_time_limit, DEFAULT_MULLOC_TIME_LIMIT])
         CSV.write(joinpath("$output_path", "params_summary.csv"), df4, writeheader=true)
 
         if till_img_idx == i_idx
