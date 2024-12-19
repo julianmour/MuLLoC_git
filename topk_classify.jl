@@ -1,4 +1,4 @@
-using Revise
+222using Revise
 using Gurobi
 using PyCall
 using JLD2
@@ -24,8 +24,7 @@ pickle = pyimport("pickle")
 np = pyimport("numpy")
 
 runs = prepare_runs()
-
-runs = prepare_baseline_runs()
+# runs = prepare_baseline_runs()
 
 # skip_sampling = true
 const DEFAULT_RANDOM_SAMPLING_DURATION = 0.25
@@ -51,11 +50,6 @@ continue_check = true
 # runs = prepare_runs_single_pascal_voc_noDef_x3()
 
 single_sample_mode = false
-
-# pascal_voc_x3_0001 = ["img1_0", "img5_2", "img8_8-10-14-19", "img10_5-6-13-14", "img11_4-8-10-14", "img15_7",
-# "img16_11", "img19_5-6-13-14", "img20_4-8-10-14-19", "img21_4-8-10-14", "img22_4-8-10-14", "img24_8-10-14-15",
-# "img25_6", "img27_6", "img29_2"]
-# runs = [Dict("dataset" => "pascal-voc", "model" => "pascal-voc_noDef_x3", "eps" => 0.001, "k" => 4)]
 
 for args in runs
     model_name = args["model"]
@@ -258,20 +252,6 @@ for args in runs
 
     start_from_img_idx = 1
     till_img_idx = 5
-#     if k_ == 2 && eps == 0.001 && (!skip_super_milps) && skip_swap_milps
-#         continue
-#     end
-#
-#     if k_ == 2 && eps == 0.01 && !skip_swap_milps
-#         start_from_img_idx = 3
-#     end
-
-#     if k_ == 2 && eps == 0.01 && continue_check
-#         start_from_img_idx = 16
-#         global continue_check = false
-#     elseif continue_check
-#         continue
-#     end
 
     # skip = [1,3,5,7,9,11,13,15,17,19]
     skip = []
